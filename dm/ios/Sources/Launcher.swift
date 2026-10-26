@@ -1,49 +1,15 @@
 // Launcher: the settings screen shown before the game starts (front_ios.m dm_show_launcher). Its settings come from the app's dm/launcher.json, which build_ipa.sh writes for this game
 // from dm/games/settings.tsv (dm/games/settings.py): each sets an environment variable the host reads when the game starts. A variable an env file set (Documents/env.txt, the bundle's
-// dm/env.txt; main.m lists them in DM_ENV_FILE_KEYS) is shown but kept. The choices are kept in UserDefaults. DM_LAUNCHER=0 in Documents/env.txt starts the game at once, as an app
-// without launcher.json does
+// dm/env.txt; main.m lists them in DM_ENV_FILE_KEYS) is shown but kept. All settings share one screen, grouped by section. Choices that differ from the game's default are kept
+// in UserDefaults; Reset to tested defaults forgets them. DM_LAUNCHER=0 in Documents/env.txt starts the game at once, as an app without launcher.json does
 import SwiftUI
 import UIKit
 import os
 
-private struct Setting: Decodable, Identifiable {
-    let env, kind, label, note, def: String
-    let options: [[String]]?   // choice: [value, label]
-    let min, max, step: Double?   // range
-    var id: String { env }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", options, min, max, step }
-}
-private struct SettingsFile: Decodable { let settings: [Setting] }
-
 private func info(_ key: String) -> Any? { Bundle.main.object(forInfoDictionaryKey: key) }
-private let defaults = UserDefaults.standard
 
-private final class LauncherModel: ObservableObject {
-    let settings: [Setting]
-    let fromFile: Set<String>   // set by an env file: shown, not changed
-    @Published var values: [String: String] = [:]
-
-    init(_ settings: [Setting]) {
-        self.settings = settings
-        fromFile = Set((ProcessInfo.processInfo.environment["DM_ENV_FILE_KEYS"] ?? "").split(separator: " ").map(String.init))
-        for s in settings {
-            if fromFile.contains(s.env), let v = ProcessInfo.processInfo.environment[s.env] { values[s.env] = v; continue }
-            let saved = defaults.string(forKey: "launcher." + s.env)
-            values[s.env] = saved.flatMap { v in s.options == nil || s.options!.contains { $0[0] == v } ? v : nil } ?? s.def   // a saved choice the game no longer offers: its default
-        }
-    }
-
+private extension LauncherModel {
     func binding(_ s: Setting) -> Binding<String> { Binding(get: { self.values[s.env] ?? s.def }, set: { self.values[s.env] = $0 }) }
-
-    // Before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default)
-    func apply() {
-        for s in settings {
-            let v = values[s.env] ?? s.def
-            if fromFile.contains(s.env) { fputs("launcher: \(s.env) kept at \(v) (env file)\n", stderr); continue }
-            defaults.set(v, forKey: "launcher." + s.env)
-            setenv(s.env, v, 1); fputs("launcher: \(s.env)=\(v)\n", stderr)
-        }
-    }
 }
 
 private struct SettingRow: View {
@@ -76,35 +42,20 @@ private struct SettingRow: View {
                 } label: {
                     settingLabel
                 }
-                .pickerStyle(.navigationLink)
+                .pickerStyle(.menu)
             case "range":
-                NavigationLink {
-                    Form {
-                        Section {
-                            HStack {
-                                Text(s.label)
-                                Spacer()
-                                Text(percentage).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                            Slider(value: rangeValue, in: (s.min ?? 0)...(s.max ?? 1), step: s.step ?? 0.05)
-                                .accessibilityLabel(s.label)
-                                .accessibilityValue(percentage)
-                                .disabled(locked)
-                        } footer: {
-                            if !note.isEmpty { Text(note) }
-                        }
-                    }
-                    .navigationTitle(s.label)
-                    .navigationBarTitleDisplayMode(.inline)
-                } label: {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         settingLabel
                         Spacer()
                         Text(percentage).monospacedDigit().foregroundStyle(.secondary)
                     }
+                    Slider(value: rangeValue, in: (s.min ?? 0)...(s.max ?? 1), step: s.step ?? 0.05)
+                        .accessibilityLabel(s.label)
+                        .accessibilityValue(percentage)
                 }
             default:
-                Toggle(isOn: Binding(get: { (m.values[s.env] ?? s.def) == "1" }, set: { m.values[s.env] = $0 ? "1" : "0" })) {
+                Toggle(isOn: Binding(get: { (m.values[s.env] ?? s.def) == s.onValue }, set: { m.values[s.env] = $0 ? s.onValue : s.offValue })) {
                     settingLabel
                 }
             }
@@ -119,25 +70,33 @@ private struct LauncherView: View {
     @State private var memory = os_proc_available_memory()
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 16) {
-                if let icon = appIcon() {
-                    Image(uiImage: icon).resizable().frame(width: 96, height: 96)
-                        .clipShape(RoundedRectangle(cornerRadius: 22))
-                        .accessibilityHidden(true)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                VStack(spacing: 16) {
+                    if let icon = appIcon() {
+                        Image(uiImage: icon).resizable().frame(width: 96, height: 96)
+                            .clipShape(RoundedRectangle(cornerRadius: 22))
+                            .accessibilityHidden(true)
+                    }
+                    Text((info("CFBundleDisplayName") as? String) ?? "Game")
+                        .font(.title.weight(.bold)).multilineTextAlignment(.center)
+                    Text("Version \((info("CFBundleShortVersionString") as? String) ?? "")")
+                        .font(.callout).foregroundStyle(.secondary)
+                    playButton
                 }
-                Text((info("CFBundleDisplayName") as? String) ?? "Game")
-                    .font(.title.weight(.bold)).multilineTextAlignment(.center)
-                Text("Version \((info("CFBundleShortVersionString") as? String) ?? "")")
-                    .font(.callout).foregroundStyle(.secondary)
-                playButton
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            NavigationStack {
+                .padding(16)
+                .frame(width: geometry.size.width / 3, height: geometry.size.height)
                 List {
+                    ForEach(m.sections, id: \.self) { section in
+                        Section(section) {
+                            ForEach(m.settings.filter { $0.sectionTitle == section }) { SettingRow(s: $0, m: m) }
+                        }
+                    }
                     Section {
-                        ForEach(m.settings) { SettingRow(s: $0, m: m) }
+                        Button("Reset to tested defaults") { m.reset() }
+                            .disabled(!m.changed)
+                    } footer: {
+                        Text("Brings back all settings this game was tested with.")
                     }
                     Section {
                         HStack {
@@ -148,10 +107,9 @@ private struct LauncherView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
-                .navigationTitle("Settings")
-                .navigationBarTitleDisplayMode(.inline)
+                .contentMargins(.horizontal, 12, for: .scrollContent)
+                .frame(width: geometry.size.width * 2 / 3)
             }
-            .frame(maxWidth: .infinity)
         }
         .preferredColorScheme(.dark)
         .task {
