@@ -1681,6 +1681,10 @@ def main(args=None):
         b, u = picks[ver]
         dirs[ver] = extract(nx, keys, ex, ver, b, u, clone, logs, g)
         if u is None and clone is None and can_clone(ex): clone = dirs[ver] / 'RomFS'
+    npdm = dirs[pkg_ver] / 'ExeFS/main.npdm'
+    if npdm.is_file() and not npdm.read_bytes()[0xC] & 1:   # META flags, bit 0: the program's code is 64-bit; the host runs the game's own arm64 code
+        have = ', '.join(f'{b["display"]} ({v})' for v, b in g.builds().items())
+        raise BuildError(f'{pkg_ver} is a 32-bit (AArch32) build, which the host cannot run' + (f'; the profile registers {have}: use that update' if have else ''))
     bad = [] if derived else [f'{v}: {x}' for v in versions for x in build_mismatch(dirs[v], v, g)]   # every module's build ID must be the one the profile registers for its version
     if bad and provisional: raise BuildError(f'not the builds provisional game profile {g.id} registers: {"; ".join(bad)}')
     if bad:   # files of other builds under a registered version's tag: packed like any other version

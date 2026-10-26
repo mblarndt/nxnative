@@ -5,6 +5,7 @@
 // Controllers: buttons by position as on the iPhone (right A, bottom B, top X, left Y), shoulders L R, triggers ZL ZR, Menu + Options −, both sticks and their presses.
 // Each controller is a player of its own (local co-op): the first one connected is player 1, together with the keyboard, the next player 2, and so on up to 8 (pad_slots.h);
 // DM_PAD_MERGE=1 merges every controller into player 1 instead, DM_KBD_PLAYER=own makes the keyboard player 1 on its own, with the controllers from player 2 on.
+// iPhones: AstrisPad's Mac host (MacSwitch, or AstrisPhoneController's MacHost) is a DSU server on 127.0.0.1:26760; each phone it serves is a controller like the above, with analog sticks (dsu_pad.h).
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
@@ -14,9 +15,14 @@
 #include "front.h"
 #include "hle.h"
 #include "pad_slots.h"
+#include "dsu_pad.h"
 #include "haptics_apple.h"
 #include <signal.h>
 #include <math.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 static CAMetalLayer *g_layer;
 static uint64_t g_btn;
@@ -159,6 +165,62 @@ static void pads_changed(GCController *gone) {
     }
     dm_pad_players(pad_slot_mask(&g_slots));
 }
+// iPhones (DSU, dsu_pad.h): the Mac host of AstrisPad serves each phone as a slot of a DSU (cemuhook) server on 127.0.0.1:26760. The front end registers every second and each connected slot takes a player
+// like a physical controller (pad_slots.h; the name "iPhone n" gives a returning phone its player back), analog, with both sticks. Nothing happens while no server runs. DM_DSU=0 turns it off, DM_DSU_PORT=<port>
+// picks another port; with DM_PAD_MERGE it stays off. Everything runs on the main queue, as the GameController handlers do, so g_slots needs no lock.
+static char g_dsu_token[DSU_SLOTS];            // the owner of slot s in g_slots (only the address matters)
+static int g_dsu_player[DSU_SLOTS] = {-1, -1, -1, -1};   // the player slot s holds; -1 none, -2 every player was taken (asked again after the phone has gone)
+static uint64_t g_dsu_seen[DSU_SLOTS];         // when a packet of slot s last came (ns)
+static int g_dsu_fd = -1;
+static dispatch_source_t g_dsu_read, g_dsu_timer;
+static uint64_t dsu_now(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+static void dsu_drop(int s) {   // slot s has no phone any more: free its player and let go of what it held
+    int p = g_dsu_player[s]; g_dsu_player[s] = -1;
+    if (p < 0) return;
+    char nb[16]; npad_name(p, nb, sizeof nb); LOG("iPhone %d disconnected: player %d (npad %s) is free", s + 1, p + 1, nb);
+    pad_slot_free(&g_slots, &g_dsu_token[s]);
+    dm_pad_set_player(p, 0, 0, 0, 0, 0);
+    dm_pad_players(pad_slot_mask(&g_slots));
+}
+static void dsu_apply(const dsu_pad *d) {
+    int s = d->slot;
+    if (!d->connected) { dsu_drop(s); return; }
+    if (g_dsu_player[s] == -1) {
+        char nm[16], nb[16]; snprintf(nm, sizeof nm, "iPhone %d", s + 1);
+        int p = pad_slot_take(&g_slots, &g_dsu_token[s], nm);
+        if (p < 0) { LOG("%s connected: all %d players are taken, not used", nm, DM_PLAYERS); g_dsu_player[s] = -2; return; }
+        g_dsu_player[s] = p;
+        npad_name(p, nb, sizeof nb); LOG("%s connected: player %d (npad %s)", nm, p + 1, nb);
+        dm_pad_players(pad_slot_mask(&g_slots));
+    }
+    if (g_input_on && g_dsu_player[s] >= 0) dm_pad_set_player(g_dsu_player[s], d->buttons, d->lx, d->ly, d->rx, d->ry);
+}
+static void dsu_read(void) {
+    uint8_t buf[256]; ssize_t n; dsu_pad d;
+    while ((n = recv(g_dsu_fd, buf, sizeof buf, 0)) > 0) if (dsu_parse(buf, (size_t)n, &d)) { g_dsu_seen[d.slot] = dsu_now(); dsu_apply(&d); }
+}
+static void dsu_start(void) {
+    const char *e = getenv("DM_DSU"); if ((e && !atoi(e)) || g_merge) return;
+    e = getenv("DM_DSU_PORT"); int port = e && atoi(e) > 0 ? atoi(e) : DSU_PORT;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0); if (fd < 0) return;
+    struct sockaddr_in me = {.sin_len = sizeof me, .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};   // port 0: the system picks, the server answers to it
+    if (bind(fd, (struct sockaddr *)&me, sizeof me) < 0) { close(fd); return; }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    g_dsu_fd = fd;
+    g_dsu_read = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)fd, 0, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(g_dsu_read, ^{ dsu_read(); });
+    dispatch_resume(g_dsu_read);
+    static uint8_t reg[DSU_REGISTER_LEN]; dsu_register(reg, arc4random());
+    struct sockaddr_in srv = me; srv.sin_port = htons((uint16_t)port);
+    g_dsu_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(g_dsu_timer, DISPATCH_TIME_NOW, NSEC_PER_SEC, NSEC_PER_SEC / 10);
+    dispatch_source_set_event_handler(g_dsu_timer, ^{
+        sendto(g_dsu_fd, reg, sizeof reg, 0, (struct sockaddr *)&srv, sizeof srv);   // the server forgets a client after 8 s
+        for (int s = 0; s < DSU_SLOTS; s++) if (g_dsu_player[s] != -1 && dsu_now() - g_dsu_seen[s] > 3 * NSEC_PER_SEC) dsu_drop(s);   // a connected slot sends at least ten times a second: silence means the server or phone is gone
+    });
+    dispatch_resume(g_dsu_timer);
+    LOG("front end: iPhones as controllers from the DSU server on 127.0.0.1:%d (DM_DSU=0 turns it off)", port);
+}
 // Focus: a window that is no longer key sees no key-up, mouse-up or controller release, so whatever is held when it loses focus (another app, the text box, minimized) would
 // stay pressed in the game. The front end releases only what it pressed itself: player 1's pad and the touch are also DM_KEYS / DM_CTL's (hle_hid.c), and a scripted hold goes on.
 // Out of focus a controller's changes are ignored, so back in focus each controller is read as it is now (a button still held, a stick still deflected)
@@ -169,6 +231,7 @@ static void input_release(void) {
     if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); }
     if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) { dm_pad_set(0, 0, 0, 0, 0); break; } }
     else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p]) dm_pad_set_player(p, 0, 0, 0, 0, 0);
+    for (int s = 0; s < DSU_SLOTS; s++) if (g_dsu_player[s] >= 0) dm_pad_set_player(g_dsu_player[s], 0, 0, 0, 0, 0);   // a phone's next packet (ten a second) takes it up again once the window is key
 }
 static void input_resume(void) {
     g_input_on = 1;
@@ -265,6 +328,7 @@ void front_run(void (*guest)(void)) {
                 pads_changed(conn ? nil : c); }];
         dm_haptics_apple_init();
         pads_start();
+        dsu_start();
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
             if (e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand)) return e;   // ⌘ shortcuts go to the menu; a key released while ⌘ is held still reaches the game, or it would stay pressed
