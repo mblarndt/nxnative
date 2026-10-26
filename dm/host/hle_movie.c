@@ -71,7 +71,7 @@ typedef struct {
     int w, h, fmt_sent, started, in_eos;          // in_eos: an end-of-stream packet was sent; no input until Flush / Stop (h_movie_AcqIn)
     uint8_t *in[MD_NIN]; int infree[MD_NIN], ninfree;                     // queue of free input indices
     int inown[MD_NIN]; uint64_t instale[MD_NIN];                          // inown: acquired by the client and not sent yet; instale: when a Flush / Stop found it held (the client may still send it), 0 if not
-    struct { int used, pic; int64_t pts; uint32_t flags; uint8_t *frm; size_t cap, bytes; } out[MD_NOUT];   // pic: frm holds a decoded picture (audio: bytes of PCM); cap: bytes in frm
+    struct { int used, pic, acq; int64_t pts; uint32_t flags; uint8_t *frm; size_t cap, bytes; } out[MD_NOUT];   // pic: frm holds a decoded picture (audio: bytes of PCM); cap: bytes in frm; acq: the client holds the index (AcquireOutputBufferIndex until released)
     int outq[MD_NOUT], noutq;                                             // queue of ready output indices
     struct { int in, off, size; int64_t pts; uint32_t flags; } pend[MD_NIN]; int npend;   // input packets waiting to be decoded (in arrival order)
     // Decoding: dmu lets only one guest thread take and decode packets at a time (packets enter libvpx in order); wmu / wcv hand one job to the host thread and wait for it
@@ -569,7 +569,7 @@ static void md_reset(mdec_t *d, int close) {
     for (int i = 0; i < MD_NIN; i++) { d->infree[i] = i; d->instale[i] = d->inown[i] ? now : 0; d->inown[i] = 0; }
     d->ninfree = MD_NIN; d->noutq = 0; d->npend = 0; d->avc_drain = 0; d->in_eos = 0;
     // a flush keeps each slot's last picture: the same game reads an output it acquired before the flush right after it (a black frame in the loop otherwise)
-    for (int i = 0; i < MD_NOUT; i++) { d->out[i].used = 0; if (close) d->out[i].pic = 0; }
+    for (int i = 0; i < MD_NOUT; i++) { d->out[i].used = 0; d->out[i].acq = 0; if (close) d->out[i].pic = 0; }
     pthread_mutex_unlock(&d->mu);
     pthread_mutex_unlock(&d->dmu);
 }
@@ -662,7 +662,7 @@ HLE_FORCE("_ZN5movie7Decoder24AcquireOutputBufferIndexEPiPlPjS1_", "movie decode
     int r = MD_NO_OUTPUT; *idx = -1; *left = 0;
     if (d->noutq && d->started) {
         int s = d->outq[0]; memmove(d->outq, d->outq + 1, --d->noutq * sizeof *d->outq);
-        *idx = s; *pts = d->out[s].pts; *flags = d->out[s].flags; *left = d->noutq; r = 0;
+        d->out[s].acq = 1; *idx = s; *pts = d->out[s].pts; *flags = d->out[s].flags; *left = d->noutq; r = 0;
     }
     pthread_mutex_unlock(&d->mu);
     if (!r) MD_TRACE(d, 8, "AcquireOutputBufferIndex → index %d time %lld flags %#x left %d", *idx, (long long)*pts, *flags, *left);
@@ -729,6 +729,14 @@ static int md_out_tex(mdec_t *d, int i, void *buf) {
     if (d->out[i].pic && d->out[i].frm) nvn_host_write_texture(tex, d->out[i].frm, w, h, (size_t)d->w * 4, NULL, NULL);
     void *sy = G.nvn_sync ? G.nvn_sync(buf) : NULL; if (sy && nvn_host_signal_sync(sy) && !d->red_dec++) LOG("[RED] movie: the buffer's sync object %p is not an NVNsync", sy);
     MD_TRACE(d, 12, "GetOutputBuffer index %d → texture %p (%d×%d format %#x)%s", i, tex, tw, th, f, d->out[i].pic ? "" : " (no picture: the texture keeps its last frame)");
+    // The SDK's native-texture GetOutputBuffer is CopyOutputBufferToClientTextureAndRelease (renderOutputBufferAndRelease): the index is the decoder's again once the picture is in the texture,
+    // and a later ReleaseOutputBufferIndex finds it released (the SDK turns that error into success). Super Mario Party Jamboree's player (nn::bezel::Movie) relies on it: it forgets the index
+    // after GetOutputBuffer and never releases it, so with 16 slots held the decoder took no more packets and its opening movie stayed on the first picture (a picture and its buffer stay until the slot is reused)
+    pthread_mutex_lock(&d->mu);
+    int rel = d->out[i].acq; if (rel) { d->out[i].acq = 0; d->out[i].used = 0; }
+    int queued = d->npend, drain = d->avc_drain;
+    pthread_mutex_unlock(&d->mu);
+    if (rel) { MD_TRACE(d, 14, "output %d released with the texture copy (%d packets queued)", i, queued); if (queued || drain) md_pump(d); }
     return 0;
 }
 HLE_FORCE("_ZN5movie7Decoder15GetOutputBufferEiPNS_6BufferE", "movie decoder: get a frame", int, h_movie_GetOut, void **self, int i, void *buf) {
@@ -766,7 +774,8 @@ HLE_FORCE("_ZN5movie7Decoder24ReleaseOutputBufferIndexEi", "movie decoder: relea
     mdec_t *d = md_of(self); if (!d) return 0x1000;
     if (i < 0 || i >= d->nout) return 0x100b;
     pthread_mutex_lock(&d->mu);
-    d->out[i].used = 0; d->out[i].pic = 0;
+    if (d->mode == MD_MODE_TEX && !d->out[i].acq) { pthread_mutex_unlock(&d->mu); return 0; }   // already released by GetOutputBuffer (md_out_tex): nothing to release, and the slot may hold a newer picture
+    d->out[i].acq = 0; d->out[i].used = 0; d->out[i].pic = 0;
     int queued = d->npend, drain = d->avc_drain;
     pthread_mutex_unlock(&d->mu);
     MD_TRACE(d, 13, "ReleaseOutputBufferIndex index %d (%d packets queued%s)", i, queued, drain ? ", H.264 pictures draining" : "");

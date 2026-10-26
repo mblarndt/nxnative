@@ -150,6 +150,13 @@ A decoder hands out as many outputs as it has slots, and while every slot is tak
 - **Fix:** both paths now go through `md_avc_open` (`hle_movie.c`).
 - **Found on:** [Absolum](../../dm/games/0100A83022A22000/README.md) (H.264 logos, FNA3D's `nx_video_player.cpp`: type 1, output 3, mode 2). Monster Hunter Rise's movies never brought parameter sets to `Configure`.
 
+### Native-texture `GetOutputBuffer` releases the index
+
+- **Symptom:** a native-texture movie stops after about 17 pictures, the game keeps presenting frames and the screen stays on an early picture of the movie, while other sound plays (`DM_MOVIE_TRACE=1`: 16 `AcquireOutputBufferIndex` lines, one `GetOutputBuffer` per index, no `ReleaseOutputBufferIndex`, 4 packets queued for good).
+- **Cause:** in the SDK, `DecoderImpl::GetOutputBuffer` in native-texture mode is `CopyOutputBufferToClientTextureAndRelease` (`MediaCodec::renderOutputBufferAndRelease`): the index is free again once the picture is in the texture, and a later `ReleaseOutputBufferIndex` is turned from an error into success. Super Mario Party Jamboree's `nn::bezel::Movie` (`main+0x793df0`) sets its queue entry's index to -1 after `GetOutputBuffer` in mode 2 and never releases it. The host kept the slot until a release, so after 16 outputs the decoder took no more packets.
+- **Fix:** `md_out_tex` frees the slot it just wrote (`acq` marks an index the client holds, set by `AcquireOutputBufferIndex`) and decodes the queued packets; `ReleaseOutputBufferIndex` of a native-texture decoder does nothing for an index the client no longer holds.
+- **Found on:** Super Mario Party Jamboree (SDK 17.5.9, provisional profile): the opening movie plays after it.
+
 ### Last picture kept across a flush and at end of stream
 
 - **Symptom:** looping movie previews flash black at the end of every loop.

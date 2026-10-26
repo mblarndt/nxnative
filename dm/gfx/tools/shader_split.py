@@ -632,10 +632,13 @@ def bea_members(d, label):
     even the two whose stored length equals their length, so the frame magic decides. → (path, data) of each entry"""
     n, arr = struct.unpack_from('<QQ', d, 0x20)
     zstd = None
+    inline = d[arr:arr + 4] == b'ASST'   # version 0x600 (Super Mario Party Jamboree): the entries follow one another at the offset (each its own size at +4, 0x48), data and name offsets at +0x38 / +0x40
+    esz = struct.unpack_from('<I', d, arr + 4)[0] if inline else 0
     for i in range(n):
-        o = struct.unpack_from('<Q', d, arr + 8 * i)[0]
+        o = arr + esz * i if inline else struct.unpack_from('<Q', d, arr + 8 * i)[0]
         if d[o:o + 4] != b'ASST': red(f'{label}: entry {i} @{o:#x} is not an ASST entry')
-        csz, usz, off, nm = struct.unpack_from('<II4xQQ', d, o + 0x14)
+        csz, usz = struct.unpack_from('<II', d, o + 0x14)
+        off, nm = struct.unpack_from('<QQ', d, o + (0x38 if inline else 0x20))
         path = d[nm + 2:nm + 2 + struct.unpack_from('<H', d, nm)[0]].decode('utf-8', 'replace')
         data = d[off:off + csz]
         if data[:4] == ZSTD_MAGIC:
