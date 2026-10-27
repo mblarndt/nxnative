@@ -36,6 +36,14 @@ The game may also write into an NVN object directly, without an NVN call, throug
 
 ## Memory pools
 
+### A dynamic pool the game never writes must start as zeros (`zero_dynamic_pools`)
+
+- **Symptom:** player models in screen-filling polygons (Super Mario Party Jamboree's character select: Mario, Luigi, Peach and Toadette all broken, the same scene perfect in a run where the memory happened to be zero); `NaN` and ±∞ clip positions in a vertex shader's output for the draws of two small meshes (343 and 693 vertices) that read their positions from a vertex stream.
+- **Cause:** the game's model component creates a per-instance buffer for each face mesh (`ComModel`, 4116 and 8316 bytes, in an 8 MB pool with flags 0x22) and never writes it: no CPU store after the buffer exists, no GPU copy, clear, compute or transform feedback. It depends on the pool's memory being zero. The game's allocator hands the pool the memory of a file read buffer it freed (`menu~menu03.nx.bea`, 4 MB chunks), which held pieces of the compressed archive, so the vertices were random bits (about 7.9 bits of entropy per byte, 28 of 343 clip positions NaN). With fresh memory the same buffer read zero and the faces collapsed out of sight; which one a run got depended on the allocator's reuse. A pool's content at creation is undefined in the API
+- **Fix:** profile key `zero_dynamic_pools on`: a non-virtual pool with flags 0x22 (CPU uncached, GPU cached) is zeroed in `MemoryPoolInitialize`, and the memory of a buffer in such a pool is zeroed again in `nvnBufferFinalize`. The second part matters when the player goes back to a character: its models are freed and made again in memory the game's allocator reuses inside pools that exist already, and with the pool zeroing alone 15 of 47 steps through the character select glitched (measured by a script that cycles through the characters and checks the pane for the grey background), with both 0 of 49. Pools of other flags are not: preloaded asset pools (flags 0x24 / 0x62, created over a loaded archive) hold their data when the game creates them, and zeroing every small pool turned the whole picture grey.
+- **Check:** a vertex shader's output for the broken draw run on the dumped streams on the GPU (a `main0` copy writing `gl_Position` to a buffer); hiding non-finite positions in the shader left two garbage triangles (15 % of the pane), so a shader guard is no substitute.
+- **Found on:** Super Mario Party Jamboree (SDK 17.5.9, provisional profile, no game folder yet).
+
 ### Heaps cut from a pool at alignment relative to its GPU address
 
 - **Symptom:** a null write as soon as the main thread starts recording a command buffer (13 Sentinels: a constructor at `main+0x2fa9a0` runs on `this = 0` when the prologue enters its first battle).

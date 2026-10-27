@@ -201,6 +201,10 @@ NVN(nvnMemoryPoolInitialize, NVNboolean, NVNmemoryPool *p, const NVNmemoryPoolBu
     if (!o->mem && (o->flags & 0x200)) { uint8_t *vr = vpool_reserve(o); if (vr) o->mem = vr; }   // a sparse virtual pool's own address range (see MapVirtual)
     else if (o->mem) { mtl_pool_add(o->mem, o->size); nvn_dirty_add_range(o->mem, o->size); }
     if (!o->mem && !(o->flags & 0x200)) LOG("[RED] MemoryPoolInitialize: non-virtual pool has no storage flags=%#x size=%#llx", o->flags, o->size);
+    // Profile zero_dynamic_pools: a pool the CPU writes and the GPU reads (CPU uncached, GPU cached: flags 0x22) starts as zeros. Super Mario Party Jamboree's player models make a vertex buffer
+    // for their face meshes that nothing ever writes; it relies on its pool's memory being zero. The pool lies where the game's allocator reused a freed file read buffer, so the buffer held
+    // pieces of the compressed archive and the faces came out as screen-filling polygons (the same buffer read zero whenever the memory was fresh). The pool's memory is undefined by the API
+    if (DM_GAME_ZERO_DYNAMIC_POOLS && o->mem && !(o->flags & 0x200) && o->flags == 0x22) memset(o->mem, 0, o->size);
     if (getenv("DM_NVN_VLOG")) { LOG("[nvn] MemoryPool %p mem=%p size=%#llx flags=%#x", (void *)p, (void *)o->mem, (unsigned long long)o->size, o->flags); void dm_backtrace(uint64_t fp); dm_backtrace((uint64_t)__builtin_frame_address(0)); }
     OLOG("MemoryPool %p mem=%p size=%#llx flags=%#x", (void *)p, (void *)o->mem, o->size, o->flags);
     return 1;
@@ -1843,7 +1847,13 @@ NVN(nvnBufferInitialize, NVNboolean, NVNbuffer *buf, const NVNbufferBuilder *b) 
     OLOG("BufferInitialize %p pool=%p off=%#llx size=%#llx", (void *)buf, (const void *)bb->pool, (unsigned long long)bb->off, (unsigned long long)bb->size);
     return 1;
 }
-NVN(nvnBufferFinalize, void, NVNbuffer *buf) { ((buf_t *)buf)->magic = 0; }
+NVN(nvnBufferFinalize, void, NVNbuffer *buf) {
+    // zero_dynamic_pools: a buffer's memory is zero again once the game gives the buffer back, as the game's next buffer there expects (see MemoryPoolInitialize): going back to a character whose models were
+    // freed and made again put new face buffers on the freed ones' stale contents (15 of 47 steps through the character select glitched with the pool zeroing alone, none of 49 with this)
+    const buf_t *b = BF(buf);
+    if (DM_GAME_ZERO_DYNAMIC_POOLS && b->magic && b->pool && b->pool->mem && b->pool->flags == 0x22 && b->off >= 0 && (uint64_t)b->off + b->size <= b->pool->size) memset(b->pool->mem + b->off, 0, b->size);
+    ((buf_t *)buf)->magic = 0;
+}
 NVN(nvnBufferSetDebugLabel, void, NVNbuffer *buf, const char *s) { (void)buf; (void)s; }
 NVN(nvnBufferGetAddress, NVNbufferAddress, const NVNbuffer *buf) { return (NVNbufferAddress)(BF(buf)->pool->mem + BF(buf)->off); }
 NVN(nvnBufferMap, void *, const NVNbuffer *buf) { return BF(buf)->pool->mem + BF(buf)->off; }
