@@ -17,6 +17,14 @@ The game allocates NVN objects with the sizes of *its* SDK's headers, which shra
 - **Found on:** SDK 16 games (`NVNtexture`, `NVNtextureView`); [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) (`NVNprogram`).
 - **Check:** check every host object against the new SDK: `_Static_assert(sizeof(host) <= N)` next to the struct, and when a crash returns to a nonsense address, look at the 0x100 bytes below `sp` in the crash report for a zeroed frame.
 
+### A game writes the offset and size into its `NVNbuffer` (`buf_t`)
+
+- **Symptom:** the game runs at its frame rate and draws nothing, apart from the 3-vertex passes of its post chain; the pass dump (`DM_NVN_PASSDUMP`) shows every uniform buffer of every draw at the same address (`addr=0x394000100`, pool + 0x100) with a different huge `size=` (`1261143552`, `1504206080`, in steps of 256) and `f=` values that are garbage; `GetSize` returns 1.3 GB for a 96-byte buffer.
+- **Cause:** `NuShaderManagerGen::AllocShaderConstBuffer` (LEGO Star Wars: The Skywalker Saga) makes one `NVNbuffer` per dynamic constant buffer once, over a placeholder range (pool offset 0x100), and then writes each allocation's offset in the pool at +0x18 and its size at +0x20 of the NVNbuffer itself, which is where NVN's object holds them; it binds with `GetAddress` / `GetSize`. The host's record kept `pool` at +8, the offset at +0x10 and the size at +0x18, so the offset landed on the size, the size on nothing, and the address was always the placeholder's.
+- **Fix:** `buf_t` (`hle_nvn.c`) keeps the offset at +0x18 and the size at +0x20 (`offsetof` asserts), the pool at +8: the game's writes are the buffer's range, as on hardware. 40 bytes fit every SDK's `NVNbuffer`.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md) (SDK 12.3.6).
+- **Check:** `DM_NVN_PASSDUMP`'s `B … cb reg` lines: distinct addresses and sizes of the right order, `f=` values that are plausible (screen size, 1/width).
+
 ### Inlined SDK code writes into `NVNcommandBuffer` +0x10
 
 The game may also write into an NVN object directly, without an NVN call, through code inlined from the SDK headers. Host records stored in place must leave those bytes alone (the same holds for recorded command memory: [Recorded commands patched in place by the game (`OP_BIND_TEX1`)](#recorded-commands-patched-in-place-by-the-game-op_bind_tex1)).
@@ -391,6 +399,12 @@ Games read this count as a position in their own command memory and size their h
   - `nvnWindowGetCrop`: read back every few frames; before any `SetCrop` it is the whole first window texture.
   - `nvnSamplerBuilderGetLodClamp`.
 - **Found on:** [The Great Ace Attorney Chronicles](../../dm/games/010036E00FB20000/README.md) (SDK 10.4.1: the first two), [Bayonetta 3](../../dm/games/01004A4010FEA000/README.md) (SDK 13.3.2: the two getters).
+
+### `nvnCommandBufferSetStencilCullCriteria` is a hint
+
+- **Symptom:** `[RED] NVN unimplemented function called: nvnCommandBufferSetStencilCullCriteria (x1=0x5 x2=0)`, about once per pass.
+- **Fix:** an empty implementation (`g_nops` in `hle_nvn.c`): the call sets the coarse stencil culling (ZCull) criteria, which changes no pixel.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md).
 
 ### `nvnDeviceRegisterFastClearDepth` is a hint
 

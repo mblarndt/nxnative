@@ -49,6 +49,14 @@ Guest threads, their synchronization and how the host schedules them. Each entry
 - **Found on:** [Metroid Dread](../../dm/games/010093801237C000/README.md), whose per-build movie request-ring gates and `core_preempt on` setting are now removed; the whole-core wait on [The Legend of Zelda: Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md) ([issue #247](https://github.com/seedds/nxnative/issues/247)) and Donkey Kong Country: Tropical Freeze ([issue #259](https://github.com/seedds/nxnative/issues/259), section 6; no profile here).
 - **Scope:** these are cooperative thread-SVC handoffs, not a complete asynchronous guest scheduler. The optional `core_preempt` profile key (`DM_PREEMPT=0` / `1` overrides it) additionally checks already-runnable peers after every thread SVC; it defaults off. Historically that broader policy moved [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md)'s first frame from 0.6 s to 2.9 s by waiting for busy decompression threads. Wake-triggered handoffs apply with either setting.
 
+### Blocking host waits give the core back (`dm_thread_host_wait`)
+
+- **Symptom:** a boot that stops after the first thread is started and never presents a frame, with no `[RED]` line: `DM_WATCH` shows the main thread `running/not waiting` with a growing CPU time, a priority-28 thread on core 0 `running/not waiting` with 0.00 s CPU, and `sample` the main thread in `dm_yield_to_core_peers` (`nanosleep`) and the other in a host `pthread_cond_wait` (LEGO Star Wars: The Skywalker Saga: `h_oe_PopMsg`).
+- **Cause:** starting a thread of higher priority on the caller's core is a same-core handoff ([Same-core wake handoffs](#same-core-wake-handoffs)): the starter waits until that thread blocks. A guest thread blocks through a thread SVC, which marks it waiting. `nn::oe::PopNotificationMessage` is a host function that waits on a host condition variable, and nothing told the scheduler: its thread stayed "runnable" and the main thread waited for it for ever. (Link's Awakening pops on a thread of its own as well, but at a priority that never made the handoff wait.)
+- **Fix:** a host function that blocks the calling guest thread calls `dm_thread_host_wait(1)` before it waits and `dm_thread_host_wait(0)` after: the thread counts as sleeping, and the handoffs that waited for it end (`hle_thread.c`; used by `h_oe_PopMsg`).
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md): its `Thread_…` (priority 28, `main+0x590ff0`) pops messages at once.
+- **Check:** `sample <pid>` on a stalled host: a guest thread in a host wait that is not a thread SVC, and a peer in `dm_yield_to_core_peers`.
+
 ### Simultaneous crashes of several threads
 
 - **Symptom:** several threads crash at once and the dumps interleave, then the process hangs instead of exiting.

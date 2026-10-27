@@ -23,6 +23,14 @@ The guest address space, heaps, pools, virtual address memory and the allocators
 - **Found on:** [Hyrule Warriors: Age of Calamity](../../dm/games/01002B00111A2000/README.md); [Monster Hunter Rise](../../dm/games/0100B04011742000/README.md); [Metroid Dread](../../dm/games/010093801237C000/README.md); [Catherine: Full Body](../../dm/games/0100BF00112C0000/README.md) (SDK 8.2.1; one boot). The source names no game for the late failures in a busy scene.
 - **Check:** probe `DM_SVC=1`'s `svc 0x1` request and the `AllocateMemoryBlock` result.
 
+### `SetHeapSize` above the heap region is ResultLimitReached
+
+- **Symptom:** the first boot ends in `nninitStartup` with `SetHeapSize OOM: req 0x17ce00000 > cap 0xd0000000` and `Break#1 reason=0 Result=0xd401` (LEGO Star Wars: The Skywalker Saga), before any other game code runs.
+- **Cause:** the game's `nninitStartup` (`main+0x590a20`) asks for a heap of 5.95 GB and takes 2 MB less after every refusal, down to 2.9 GB, so the first answers only have to say "too much". The host answered a request above its heap region with `0xD401`, which the SDK's `SetMemoryHeapSize` does not treat as a refusal: it aborts. Horizon's heap region is far larger than the application's memory limit, so the kernel refuses such a request on the resource limit, with `ResultLimitReached` (`0x10801`), which the SDK returns and the game's loop handles.
+- **Fix:** `SetHeapSize` above the host's heap region returns `0x10801` like a request above the pool (`hle_svc.c`; one `[mem]` line for the first). The game then settles on the largest heap the pool gives, 2.99 GB.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md).
+- **Check:** `DM_SVC=1` shows the `svc 0x1` requests; the loop is the `sub x20, x20, #0x200, lsl #12` at `main+0x590a50`.
+
 ### `nninitStartup`'s heap only without virtual address memory
 
 - Not needed in the end for [Ace Attorney Investigations Collection](../../dm/games/010005501E68C000/README.md) (1.0.0.2, SDK 17.5.3): the process heap of pull request #16. `nninitStartup` calls `SetMemoryHeapSize` / `AllocateMemoryBlock` only without virtual address memory, and nothing else in `main` calls them ([Virtual address memory follows the NPDM's system resource](#virtual-address-memory-follows-the-npdms-system-resource)).

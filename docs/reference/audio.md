@@ -52,6 +52,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Found on:** [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md) (SDK 20).
 - **Note:** the same SDK's other `AudioRenderSystem` layout is in [SDK 20's `AudioRenderSystem` layout](#sdk-20s-audiorendersystem-layout).
 
+### The game's renderer event is a local of the function that opens it
+
+- **Symptom:** an abort at the first render: `Break#1 reason=0 Result=0x0`, backtrace `render_main` → `nn::audio::ExecuteAudioRendererRendering` → `nn::os::SignalSystemEvent` → `nn::diag::detail::AbortImpl` (LEGO Star Wars: The Skywalker Saga).
+- **Cause:** the CPU / manual renderer's `OpenAudioRenderer` with an event keeps a pointer to the game's `SystemEvent` in the handle, and each render signals it from the host's render thread. `nttAudioHAL::HALNX::Initialise` passes a local (`sp+0x10`), destroyed when it returns; `SignalSystemEvent` then finds state 0 and asserts. On hardware the DSP signals a kernel handle that the event's destructor has closed, so a game that does this never uses the event after the call.
+- **Fix:** when the event lies on the caller's stack (within 64 KB above the frame of `ar_open`), the render thread signals an event of its own, made with the SDK's `CreateSystemEvent` (`hle_audren.c`; `audren: the game's event … is a local of its caller` in the log). The game's own event stays as the SDK left it.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md).
+
 ### A renderer below 48 kHz with no upsampler on the CPU
 
 - **Symptom:** SIGSEGV at address 0x18 in `UpsamplerManager::Allocate` on the render thread.
