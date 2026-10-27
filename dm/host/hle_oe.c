@@ -187,13 +187,14 @@ HLE_FORCE("_ZN2nn2oe25TryPopNotificationMessageEPj", "system notification queue;
     mq_ev_sync();   // signalled again while notifications remain, cleared when the queue is empty (also a signal left behind by a pop that found it empty)
     return ok;
 }
+void dm_thread_host_wait(int on);   // hle_thread.c
 // The blocking form (Link's Awakening pops on a thread of its own, main+0xfa1ff8): the SDK's version waits on the system event oe::Initialize would have created,
 // and the host's oe::Initialize is a no-op, so it aborted on an uninitialized event. Wait for the host queue instead, then take the message the Try path's way
 HLE_FORCE("_ZN2nn2oe22PopNotificationMessageEv", "system notification queue (blocking); waits on the host queue", uint32_t, h_oe_PopMsg, void) {
     uint32_t m = 0;
     for (;;) {
         pthread_mutex_lock(&g_mq_lock);
-        while (!g_mqn) pthread_cond_wait(&g_mq_cond, &g_mq_lock);
+        if (!g_mqn) { dm_thread_host_wait(1); while (!g_mqn) pthread_cond_wait(&g_mq_cond, &g_mq_lock); dm_thread_host_wait(0); }
         pthread_mutex_unlock(&g_mq_lock);
         if (h_oe_TryPopMsg(&m)) return m;   // another thread may have taken it in between: wait again
     }

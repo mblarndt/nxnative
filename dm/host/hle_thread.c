@@ -135,6 +135,14 @@ static int thr_in_handoff(const thr_t *t, const thr_t *self) {
 }
 // Holding G. t blocked (a guest wait, a timed sleep, YieldToAnyThread): it gave its core back, so it no longer holds the threads whose handoff made it runnable
 static void hand_leave(thr_t *t) { t->nhand = 0; }
+// A guest thread inside a blocking wait of host code (a host condition variable, as the notification message pop has): like a guest wait it gives its core back, so a thread
+// whose start or wake handed off to it (dm_yield_to_core_peers) stops waiting for it. LEGO Star Wars: The Skywalker Saga starts a priority-28 thread on core 0 that pops
+// notification messages at once; the main thread (priority 44) then waited for it to block, which it never reported
+void dm_thread_host_wait(int on) {
+    thr_t *me = pthread_getspecific(g_keythr); if (!me) return;
+    me->sleeping = on;
+    if (on && me->nhand) { pthread_mutex_lock(&G); hand_leave(me); pthread_mutex_unlock(&G); }
+}
 // The peers a handoff waits for are the ones it made runnable, not every runnable higher-priority thread of the core. The host runs a
 // lower-priority thread beside busy higher-priority threads of its core all the time (it has no per-core scheduler; core_preempt aside),
 // and waiting for those threads at a wake had no bound: Tears of the Kingdom's BootupBackgroundWorkThread (priority 58) waited at each

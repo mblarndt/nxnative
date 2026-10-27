@@ -260,7 +260,12 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
     switch (num) {
     case 0x01: {  // SetHeapSize(out_addr*, size)  → x1 = heap base
         size_t size = regs[1];
-        if (size > g_heap_cap) { LOG("SetHeapSize OOM: req %#zx > cap %#zx", size, g_heap_cap); regs[0] = 0xD401; return 0; }
+        if (size > g_heap_cap) {
+            // Horizon's heap region is far larger than the application's memory limit, so an oversized request fails the resource limit (ResultLimitReached), not the region size.
+            // LEGO Star Wars: The Skywalker Saga asks for 5.95 GB and retries in 2 MB steps until one fits; the SDK aborts on any other result (the 0xD401 it got first)
+            static int once; if (!once++) LOG("[mem] SetHeapSize %#zx > heap region %#zx: ResultLimitReached (games retry with less)", size, g_heap_cap);
+            regs[0] = 0x10801; return 0;
+        }
         pthread_mutex_lock(&g_map_lock);
         size_t previous = g_heap_cur, image = image_bytes();
         if (size < previous && map_source_busy((uintptr_t)g_heap + size, previous - size)) {

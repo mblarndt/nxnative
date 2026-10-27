@@ -157,7 +157,17 @@ static Result ar_open(void **handle, void *ev, const uint8_t *param, void *work,
     if (r) { free(owned); LOG("[RED] audren: SDK OpenAudioRenderer failed %#x", r); return r; }
     if (owned) objmap_put(handle[0], owned);   // Close releases it only after the render thread and the SDK have finished with it
     if (atomic_load(&g_open)) { LOG("[RED] audren: a second renderer (the host drives only one)"); return r; }
-    g_handle[0] = handle[0]; g_handle[1] = handle[1]; atomic_store(&g_open, 1);
+    g_handle[0] = handle[0]; g_handle[1] = handle[1];
+    // The game's SystemEvent can be a local of the function that opens the renderer, dead when the render thread signals it: LEGO Star Wars: The Skywalker Saga (nttAudioHAL::HALNX::Initialise,
+    // the event at sp+0x10) aborted in SignalSystemEvent on the first render. On hardware the DSP signals a kernel handle that the event's destructor closes, so such a game never uses it
+    // after the call. The render thread signals an event of its own instead.
+    if (ev && (uintptr_t)ev > (uintptr_t)__builtin_frame_address(0) && (uintptr_t)ev - (uintptr_t)__builtin_frame_address(0) < 0x10000) {
+        static uint8_t host_ev[0x100] __attribute__((aligned(16)));
+        Result (*create)(void *, int, int) = gsym("_ZN2nn2os17CreateSystemEventEPNS0_15SystemEventTypeENS0_14EventClearModeEb");
+        if (!host_ev[0x28] && create(host_ev, 1, 0)) LOG("[RED] audren: cannot create the render event");
+        else { g_handle[1] = host_ev; LOG("audren: the game's event %p is a local of its caller: the render thread signals the host's own", ev); }
+    }
+    atomic_store(&g_open, 1);
     g_render_tt = dm_guest_thread_spawn(render_main, NULL, 9, 0x10000);
     return r;
 }

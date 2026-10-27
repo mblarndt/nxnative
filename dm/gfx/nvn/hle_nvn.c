@@ -1222,6 +1222,7 @@ static const char *const g_nops[] = {
     "nvnCommandBufferPopDebugGroupId",
     "nvnCommandBufferInsertDebugMarkerStatic",
     "nvnCommandBufferWaitEvent",
+    "nvnCommandBufferSetStencilCullCriteria",   // LEGO Star Wars: The Skywalker Saga: the coarse stencil-cull (Z-cull) hint; it changes no pixel
     "nvnWindowFinalize",
 };
 __attribute__((constructor)) static void nvn_nops_register(void) {
@@ -1867,7 +1868,10 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
 
 // Buffer object = pool + offset + size; the GPU address and the CPU mapping are both the pool's host pointer + offset (same convention as MemoryPoolGetBufferAddress)
 typedef struct { NVNdevice *dev; const pool_t *pool; int64_t off; uint64_t size; } buf_builder_t;   FITS(buf_builder_t, NVNbufferBuilder);
-typedef struct { uint32_t magic; const pool_t *pool; int64_t off; uint64_t size; } buf_t;             FITS(buf_t, NVNbuffer);
+// LEGO Star Wars: The Skywalker Saga keeps one buffer object per dynamic constant buffer (NuShaderManagerGen::AllocShaderConstBuffer): it initializes the object once over a placeholder range (offset 0x100)
+// and then writes the offset of each allocation within the pool at +0x18 of the NVNbuffer and its size at +0x20, which is where the real object holds them, and binds with GetAddress / GetSize. The
+// record keeps offset and size there, so those writes take effect (they landed in the record's other fields before: every uniform buffer bound the same address and a garbage size, and the scene drew nothing)
+typedef struct { uint32_t magic; const pool_t *pool; uint64_t reserved; int64_t off; uint64_t size; } buf_t;   FITS(buf_t, NVNbuffer); _Static_assert(offsetof(buf_t, off) == 0x18 && offsetof(buf_t, size) == 0x20, "poked by the game");
 #define BB(b) ((buf_builder_t *)(b))
 #define BF(b) ((const buf_t *)(b))
 NVN(nvnBufferBuilderSetDefaults, void, NVNbufferBuilder *b) { NVNdevice *d = BB(b)->dev; memset(b, 0, sizeof(buf_builder_t)); BB(b)->dev = d; }
@@ -1881,7 +1885,7 @@ NVN(nvnBufferInitialize, NVNboolean, NVNbuffer *buf, const NVNbufferBuilder *b) 
     // compressing encoder (when the pause menu opens, and near a save commit): the buffer's one use is a texture-to-buffer copy of the picture's own extent, which lies inside the pool. Not an error by itself: one line.
     if ((uint64_t)bb->off + bb->size > bb->pool->size) ONCE_LOG("BufferInitialize: a buffer reaches past the end of its pool (offset %#llx size %#llx pool %#llx); only an access that leaves the pool is an error, and it is reported where it happens", (unsigned long long)bb->off, (unsigned long long)bb->size, (unsigned long long)bb->pool->size);
     cmdmap_scrub(bb->pool, bb->off, bb->size);
-    *(buf_t *)buf = (buf_t){MAGIC('B', 'U', 'F', 0), bb->pool, bb->off, bb->size};
+    *(buf_t *)buf = (buf_t){MAGIC('B', 'U', 'F', 0), bb->pool, 0, bb->off, bb->size};
     OLOG("BufferInitialize %p pool=%p off=%#llx size=%#llx", (void *)buf, (const void *)bb->pool, (unsigned long long)bb->off, (unsigned long long)bb->size);
     return 1;
 }
