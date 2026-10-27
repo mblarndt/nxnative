@@ -1,0 +1,38 @@
+# Super Mario Party Jamboree (NDcube's Bezel engine on NVN, SDK 17), update v393216 = 2.2.0.
+# Started from the NSP script's provisional profile; the memory values and zero_dynamic_pools were measured on the Mac (see the game note).
+
+# ---- Identity ----
+title_id	0100965017338000
+program_id	0100965017338000
+
+# ---- App ----
+name	Super Mario Party Jamboree
+ipa	SuperMarioPartyJamboree.ipa
+app_category	public.app-category.games
+
+# ---- Versions ----
+build	v393216	2.2.0	main=d70ce1726c979e45ed4200e9c2b23b2a	subsdk0=ff2b1a8f14147dc58034940e78a104ef	sdk=fcd139127b9c99988c2613230db18e26
+package	v393216
+shader_versions	v393216
+
+# ---- Files ----
+# every module main imports from
+modules	main subsdk0 sdk
+romfs_marker	movie/flow/op/movie/bq_op.mp4
+zip_store	.bea:.bfstm:.mp4:.metallib
+
+# ---- Memory ----
+# the NPDM declares 16 MB of system resource (virtual address memory) and main sets a heap: a 5 GB block with a large alias region; the heap check sizes the heap region from the heap the game asks for
+mem_reserve	0x1030000000
+mem_alias	0x1008000000
+mem_stack	0x10000000
+app_pool	0xCD500000
+# the NPDM declares 16 MB of system resource
+sys_resource	0x1000000
+
+# ---- Shader split ----
+shader_groups	/Archive/=archive /stream/=stream /nro/=nro /movie/=movie /.nrr/=nrr
+shader_note	Super Mario Party Jamboree shaders (provisional profile)
+
+# The engine never writes its face-mesh vertex buffers and relies on zero memory (README: Character select)
+zero_dynamic_pools	on
