@@ -778,8 +778,45 @@ static void hostseg_release(uintptr_t lo, uintptr_t hi) {
     for (int i = 0; i < g_nhostseg; i++) if (g_hostseg[i].busy && g_hostseg[i].org_hi > lo && g_hostseg[i].org_lo < hi) g_hostseg[i].busy = 0;
     pthread_mutex_unlock(&g_hostseg_mu);
 }
+// zero_dynamic_pools: where the game gave out command memory in a 0x22 pool (64-byte granules), the records the host wrote stay behind when the game takes that memory back. A buffer made over them
+// (cmdmap_scrub, at BufferInitialize) must see zeros, as it would over memory nothing ever used: Super Mario Party Jamboree makes position buffers for its models' hair and face meshes that nothing writes
+// (they draw as nothing while zero), and stale host records there (offsets and pointers as floats) came out as screen-filling slabs, now and then, in the depth and shadow passes
+enum { CMDMAP_MAX = 16, CMDMAP_SHIFT = 6 };
+static struct { const uint8_t *mem; uint64_t size; uint64_t *bits; } g_cmdmap[CMDMAP_MAX];
+static int g_ncmdmap;
+static pthread_mutex_t g_cmdmap_mu = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t *cmdmap_bits(const pool_t *pl, int create) {   // under g_cmdmap_mu
+    for (int i = 0; i < g_ncmdmap; i++) if (g_cmdmap[i].mem == pl->mem && g_cmdmap[i].size == pl->size) return g_cmdmap[i].bits;
+    if (!create) return NULL;
+    uint64_t *bits = calloc(((pl->size >> CMDMAP_SHIFT) + 64) / 64, 8);
+    if (!bits) return NULL;
+    if (g_ncmdmap == CMDMAP_MAX) { free(g_cmdmap[0].bits); memmove(g_cmdmap, g_cmdmap + 1, sizeof g_cmdmap[0] * (CMDMAP_MAX - 1)); g_ncmdmap--; }   // a pool made again at another place pushes out the oldest
+    g_cmdmap[g_ncmdmap++] = (typeof(g_cmdmap[0])){pl->mem, pl->size, bits};
+    return bits;
+}
+static void cmdmap_mark(const pool_t *pl, int64_t off, uint64_t n) {
+    if (!DM_GAME_ZERO_DYNAMIC_POOLS || pl->flags != 0x22 || !pl->mem || off < 0 || !n || (uint64_t)off + n > pl->size) return;
+    pthread_mutex_lock(&g_cmdmap_mu);
+    uint64_t *bits = cmdmap_bits(pl, 1);
+    if (bits) for (uint64_t g = (uint64_t)off >> CMDMAP_SHIFT; g <= ((uint64_t)off + n - 1) >> CMDMAP_SHIFT; g++) bits[g >> 6] |= 1ull << (g & 63);
+    pthread_mutex_unlock(&g_cmdmap_mu);
+}
+static void cmdmap_scrub(const pool_t *pl, int64_t off, uint64_t n) {
+    if (!DM_GAME_ZERO_DYNAMIC_POOLS || pl->flags != 0x22 || !pl->mem || off < 0 || !n || (uint64_t)off + n > pl->size) return;
+    pthread_mutex_lock(&g_cmdmap_mu);
+    uint64_t *bits = cmdmap_bits(pl, 0), cleared = 0;
+    if (bits) for (uint64_t g = (uint64_t)off >> CMDMAP_SHIFT; g <= ((uint64_t)off + n - 1) >> CMDMAP_SHIFT; g++) {
+        if (!(bits[g >> 6] & (1ull << (g & 63)))) continue;
+        uint64_t lo = g << CMDMAP_SHIFT, hi = lo + (1u << CMDMAP_SHIFT), a = lo > (uint64_t)off ? lo : (uint64_t)off, b = hi < (uint64_t)off + n ? hi : (uint64_t)off + n;
+        memset((uint8_t *)pl->mem + a, 0, b - a); cleared += b - a;
+        if (a == lo && b == hi) bits[g >> 6] &= ~(1ull << (g & 63));   // a granule the buffer only partly covers keeps its mark for the rest
+    }
+    pthread_mutex_unlock(&g_cmdmap_mu);
+    if (cleared) { static unsigned k; unsigned t = __atomic_add_fetch(&k, 1, __ATOMIC_RELAXED); if (t <= 8 || t % 1000 == 0) LOG("[nvn] zero_dynamic_pools: a buffer (+%#llx, %llu bytes) was made over command memory the game gave back: %llu bytes of host records cleared (%u times so far)", (unsigned long long)off, (unsigned long long)n, (unsigned long long)cleared, t); }
+}
 NVN(nvnCommandBufferAddCommandMemory, void, NVNcommandBuffer *c, const NVNmemoryPool *p, ptrdiff_t off, size_t n) {
     const pool_t *pl = (const pool_t *)p;
+    if (pl && pl->mem && n >= 64) cmdmap_mark(pl, off, n);
     if (!pl || n < 64) { if (cs_on()) { pthread_mutex_lock(&g_cs_mu); g_cs.hostseg++; pthread_mutex_unlock(&g_cs_mu); } size_t sz = hostseg_size(CB(c), !pl, n); cmd_new_segment(CB(c), hostseg_take(CB(c), sz), sz); return; }
     if (!pl->mem) { LOG("[RED] AddCommandMemory: pool has no CPU storage"); return; }
     hostseg_release((uintptr_t)(pl->mem + off), (uintptr_t)(pl->mem + off + n));
@@ -1843,6 +1880,7 @@ NVN(nvnBufferInitialize, NVNboolean, NVNbuffer *buf, const NVNbufferBuilder *b) 
     // in the pool's memory and reports a range that leaves the pool as its own red line). Breath of the Wild creates a 256 KB buffer over a 144 KB pool for a screen readback that feeds a
     // compressing encoder (when the pause menu opens, and near a save commit): the buffer's one use is a texture-to-buffer copy of the picture's own extent, which lies inside the pool. Not an error by itself: one line.
     if ((uint64_t)bb->off + bb->size > bb->pool->size) ONCE_LOG("BufferInitialize: a buffer reaches past the end of its pool (offset %#llx size %#llx pool %#llx); only an access that leaves the pool is an error, and it is reported where it happens", (unsigned long long)bb->off, (unsigned long long)bb->size, (unsigned long long)bb->pool->size);
+    cmdmap_scrub(bb->pool, bb->off, bb->size);
     *(buf_t *)buf = (buf_t){MAGIC('B', 'U', 'F', 0), bb->pool, bb->off, bb->size};
     OLOG("BufferInitialize %p pool=%p off=%#llx size=%#llx", (void *)buf, (const void *)bb->pool, (unsigned long long)bb->off, (unsigned long long)bb->size);
     return 1;
