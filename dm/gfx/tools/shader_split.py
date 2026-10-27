@@ -1245,7 +1245,7 @@ def raw_shaders(d, label, known=()):
     for s, c in rel.items():
         if c in cset and s - 8 in rel and c not in code_of and struct.unpack_from('<I', d, s + 8)[0] == struct.unpack_from('<I', d, c + 0x704)[0]: code_of[c] = rel[s - 8]
     built = adrp_targets(d, min(ctls) - 0x100000, max(ctls) + 0x100000) if any(c not in code_of for c in ctls) else {}
-    out = []
+    out, left = [], []
     for c in ctls:
         nctl, n = struct.unpack_from('<I', d, c + 0x20)[0], struct.unpack_from('<I', d, c + 0x704)[0]
         ctl, why = d[c:c + nctl], 'no code area: no data record points at one, and the code builds the address of none right after or right before it'
@@ -1253,7 +1253,16 @@ def raw_shaders(d, label, known=()):
         for k in ([code_of[c]] if c in code_of else sorted((k for k in ((c + nctl + 15) & ~15, c - n) if k in built and c in built and near(k) < 0x400), key=near)):
             code = d[k:k + n]; st = glslc_stage(ctl, code) if k >= 0 and CTL_MAGIC not in code else None
             if st and not check(label, st, ctl, code): out.append((f'{label}#RAW@{c:#x}', st, ctl, code)); why = None; break
-        if why: print(f'[RED] {label} control section @{c:#x}: {why}; left out', flush=True)
+        if why: left.append((c, ctl, n, why))
+    # A main that keeps its shaders as code area + control section pairs, every code area right before its control section (TT Games' engine: LEGO Star Wars: The Skywalker Saga, 656 of 659 left
+    # over here), has no data records and builds no addresses: when nearly all the control sections left have a code area of the length control +0x704 right before them that passes the checks, that is the layout.
+    # A compute code area has no header, so one passing before and after is taken before. The 90 % keeps this off a main with a few stray control sections (every other game's tables stay as they were)
+    before = [(c, ctl, glslc_stage(ctl, d[c - n:c])) for c, ctl, n, _ in left if c >= n and CTL_MAGIC not in d[c - n:c]]
+    before = [(c, ctl, st) for c, ctl, st in before if st and not check(label, st, ctl, d[c - struct.unpack_from('<I', ctl, 0x704)[0]:c])]
+    if len(before) >= 16 and len(before) * 10 >= len(left) * 9:
+        for c, ctl, st in before: out.append((f'{label}#RAW@{c:#x}', st, ctl, d[c - struct.unpack_from('<I', ctl, 0x704)[0]:c]))
+        left = [x for x in left if x[0] not in {c for c, _, _ in before}]
+    for c, _, _, why in left: print(f'[RED] {label} control section @{c:#x}: {why}; left out', flush=True)
     return out
 
 ONEPACK = b'ONEPACK\0'
@@ -1336,6 +1345,79 @@ def smash_arc_shaders(path, rel, ents, out):
             label = f'/{rel}/{kind.decode("latin1") if kind.isalnum() else "data"}#{e[0]:010x}'
             n = len(out); scan_blob(b, label, out)
             if len(out) == n and b'\x91\x68\x86\x19' in b: out.extend(glslc_shaders(b, label, need=False))
+
+TTDAT = 'TT Games DAT'
+def ttdat_index(path):
+    """The files of a DAT archive of TT Games' engine (NuFileDeviceDat; LEGO Star Wars: The Skywalker Saga: GAME.DAT … GAME4.DAT and PATCH.DAT) → [(entry, position, packed length, unpacked length, mode)],
+    None when the file is not one. The first 8 bytes are a u32 and the little-endian length of the index, which ends the file. The index is big-endian: u32 its length less 4, u32 0x2e434334 and
+    0x30544144 ("DAT0"), the version (-13, i32), the name tree (NuFileTree::Serialize: u32 2, u32 a, u32 node count, u32 name bytes, the names, 12-byte nodes, u32 0) and then NuFileTable::Serialize:
+    the version again, the file count and per file {u64 position (low 56 bits) with the pack mode in its top byte, u32 packed length, u32 unpacked length}. A file of mode 0 is stored as it is; one of mode 9
+    is a run of chunks, each {"OODL", u32 packed length, u32 unpacked length (at most 0x8000)} and the payload, a chunk with equal lengths stored as it is, the rest Oodle (nttFile / NuFileDecodeManager,
+    ReadBuffer::Fill and DecodeBuffer::Decode: DFLT, ZLIB, RFPK, LZ2K and ZIPX / ZIPY, a scrambled copy, are the other tags). The names of the entries are not needed"""
+    try:
+        sz = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            idx = struct.unpack('<I', f.read(8)[4:8])[0]
+            if not 0x40 < idx < sz: return None
+            f.seek(sz - idx); d = f.read(idx)
+    except (OSError, struct.error): return None
+    be = lambda o: struct.unpack_from('>I', d, o)[0]
+    if len(d) < 0x40 or be(4) != 0x2e434334 or be(8) != 0x30544144 or struct.unpack_from('>i', d, 12)[0] != -13: return None
+    off = 32 + be(28) + 12 * be(24) + 4
+    if off + 8 > len(d) or struct.unpack_from('>i', d, off)[0] != -13 or off + 8 + 16 * be(off + 4) > len(d): return None
+    ents = []
+    for i in range(be(off + 4)):
+        a, cl, ul = struct.unpack_from('>QII', d, off + 8 + 16 * i)
+        ents.append((i, a & 0xFFFFFFFFFFFFFF, cl, ul & 0x7fffffff, a >> 56))
+    return ents if all(e[1] + e[2] <= sz for e in ents) else None
+
+def ttdat_jobs(files, parts=64):
+    """The DAT archives of TT Games' engine (ttdat_index) in ranges of entries of about equal unpacked size, each decoded with the game's own Oodle in the Mac host and scanned (ttdat_shaders).
+    → ([(path, rel, (TTDAT, entries)), …], the paths taken)"""
+    arch = [(p, r, e) for p, r in files if p.endswith('.DAT') and (e := ttdat_index(p))]
+    total = sum(x[3] for _, _, e in arch for x in e); jobs = []
+    for p, r, e in arch:
+        cur, size, step = [], 0, max(total / parts, 1)
+        for x in e:
+            cur.append(x); size += x[3]
+            if size >= step: jobs.append((p, r, (TTDAT, tuple(cur)))); cur, size = [], 0
+        if cur: jobs.append((p, r, (TTDAT, tuple(cur))))
+    return jobs, {p for p, _, _ in arch}
+
+def ttdat_read(d, pos, cl, ul, mode, what):
+    """One file of a TT Games DAT archive (ttdat_index) decoded: mode 0 as stored, 9 chunk by chunk (Oodle through the game's own decoder). Other modes (ZIPX: 193 small files of GAME.DAT, none with
+    shaders as far as the readers looked) → None"""
+    raw = d[pos:pos + cl]
+    if mode == 0: return raw
+    if mode != 9: return None
+    out, o = [], 0
+    while o < len(raw):
+        if raw[o:o + 4] != b'OODL' or o + 12 > len(raw): red(f'{what}: a chunk at {o:#x} does not start with OODL')
+        pk, uk = struct.unpack_from('<II', raw, o + 4); pl = raw[o + 12:o + 12 + pk]; o += 12 + pk
+        out.append(pl if pk == uk else oodle(pl, uk))
+    data = b''.join(out)
+    if len(data) != ul: red(f'{what}: decoded to {len(data)} bytes, the table says {ul}')
+    return data
+
+def tt_shaders(d, label, out):
+    """Shaders in a file of TT Games' engine (*.nnx_shaders, and the same records in main, raw_shaders): each control section has its code area right before it (control +0x704 = the code length, the
+    code starts with the 0x12345678 header; compute code has none), at any alignment: LEGO Star Wars: The Skywalker Saga, 88 in one level's file"""
+    for m in re.finditer(re.escape(CTL_MAGIC), d):
+        c = m.start()
+        if c + 0x760 > len(d): continue
+        nctl, n = struct.unpack_from('<II', d, c + 0x20)[0], struct.unpack_from('<I', d, c + 0x704)[0]
+        if not 0x760 <= nctl <= 0x1000 or nctl & 3 or not 0 < n <= c or c + nctl > len(d): continue
+        ctl, code = d[c:c + nctl], d[c - n:c]
+        st = glslc_stage(ctl, code) if CTL_MAGIC not in code else None
+        if st and not check(label, st, ctl, code): out.append((f'{label}#TT@{c:#x}', st, ctl, code))
+
+def ttdat_shaders(path, rel, ents, out):
+    """A range of entries of a TT Games DAT archive (ttdat_jobs): each file decoded and read by tt_shaders"""
+    import mmap
+    with open(path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as d:
+        for i, pos, cl, ul, mode in ents:
+            data = ttdat_read(d, pos, cl, ul, mode, f'/{rel}#{i}')
+            if data and CTL_MAGIC in data: tt_shaders(data, f'/{rel}#{i}', out)
 
 _OODLE = None
 def oodle(comp, n):
@@ -1607,7 +1689,7 @@ def ps_inputs(code):
     """Generic attributes a pixel shader reads: SPH words 6–13 are the input map, 8 bits for each of the 32 attributes (Ryujinx ShaderHeader.ImapTypes), non-zero = read; the translated MSL inputs are exactly user(locn<attribute>)"""
     return {i for i in range(32) if struct.unpack_from('<I', code, 0x30 + 4 * (6 + (i >> 2)))[0] >> ((i & 3) * 8) & 0xff}
 
-SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TFXO@', '#NEEDLE@')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
+SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TT@', '#TFXO@', '#NEEDLE@')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
 # MonoGame's effects, whose passes may name no vertex shader and keep the one bound (Celeste: 10 of its 13 effects draw through SpriteBatch's vertex shader, which is in main); Next Level Games'
 # archives (Luigi's Mansion 3 makes 5,317 programs of one stage each at boot); PlatinumGames' shader objects (Bayonetta 3: one stage each, pg_shader); control sections loose in main
 # (Advance Wars 1+2: Re-Boot Camp's Bink shaders, raw_shaders), which no file pairs; and YEBIS's effect file (tfxo_shaders)
@@ -1674,6 +1756,9 @@ def scan_file(args):
         return rel, uniq_keys(found), var_pairs(found), trees
     if head[:8] in (IDRK, PDRK):
         idrk_shaders(path, '/' + rel, found)
+        return rel, uniq_keys(found), var_pairs(found), trees
+    if len(args) > 2 and args[2][0] == TTDAT:   # entries of a TT Games DAT archive (ttdat_jobs)
+        ttdat_shaders(path, rel, args[2][1], found)
         return rel, uniq_keys(found), var_pairs(found), trees
     if len(args) > 2 and head[:8] == ONEPACK:   # a range of Trinity packs (trpfs_jobs)
         trinity_shaders(path, rel, args[2], found)
@@ -1781,6 +1866,11 @@ def main():
         if not names and img.count(b'#version ') and 'glslcCompile' in main_imports(img) and glslc_module(os.path.dirname(os.path.abspath(mainnso))):
             print(f'[RED] main holds GLSL sources and imports glslcCompile, but there are no captured GLSLC outputs in {cap}: the shaders the game compiles at run time will have no translation', flush=True)
         for nm in names: found += glslc_shaders(open(os.path.join(cap, nm), 'rb').read(), f'/glslc_capture/{nm}')
+        # Programs the Mac host dumped while the game ran (DM_NVN_SHDUMP=<dir>: <key>.ctl + <key>.code): DM_SHADER_CAPTURE=<dir> adds them (bring-up of a game whose shaders are in an archive the split cannot read yet)
+        for nm in sorted(f for f in os.listdir(os.environ.get('DM_SHADER_CAPTURE', os.devnull)) if f.endswith('.ctl')) if os.environ.get('DM_SHADER_CAPTURE') else []:
+            cd = os.environ['DM_SHADER_CAPTURE']; ctl, code = open(os.path.join(cd, nm), 'rb').read(), open(os.path.join(cd, nm[:-4] + '.code'), 'rb').read()
+            st = glslc_stage(ctl, code)
+            if st and not check('capture', st, ctl, code): found.append((f'/shader_capture/{nm[:-4]}', st, ctl, code))
         # Unreal Engine shader code archives decoded on the Mac (uepak.py): <version dir>/ue_shaders, or DM_UE_SHADERS; needed when the RomFS has Unreal paks
         ued = os.environ.get('DM_UE_SHADERS') or os.path.join(os.path.dirname(os.path.abspath(romfs)), 'ue_shaders')
         names = sorted(f for f in os.listdir(ued) if f.endswith('.ushaderbytecode')) if os.path.isdir(ued) else []
@@ -1796,12 +1886,13 @@ def main():
     tr_jobs, trp = trpfs_jobs(files)   # Pokémon Legends: Z-A's Trinity packs (data.trpfs and its index data.trpfd), decoded by the game's own Oodle in the Mac host
     ue_jobs, uep = ue_legacy_jobs(files)   # Unreal paks with inline shaders: DRAGON QUEST XI S's legacy ones (the game's own LZ5 in the Mac host), OCTOPATH TRAVELER II's (Zlib)
     bd_jobs, bdts = bdt_jobs(files)   # Dark Souls Remastered's dvdbnd archives: the entries of each .bdt by its .bhd5 index, in ranges
+    td_jobs, ttds = ttdat_jobs(files)   # LEGO Star Wars: The Skywalker Saga's DAT archives (TT Games' engine), decoded by the game's own Oodle in the Mac host
     arc_jobs, arcs = smash_arc_jobs(files)   # Super Smash Bros. Ultimate's data.arc: its current files, in ranges
     pz_jobs, pkzs = pkz_jobs(files)   # Bayonetta 3's PKZ archives, Oodle Kraken decoded by the game's own decoder in the Mac host
     ck_jobs, cpks = cpk_jobs(files)   # Bayonetta 2's CRI CPK archives (CRILAYLA entries)
     zp_jobs, zips = zip_jobs(files)   # Portal's game.zip (Deflate members)
-    big += pak_jobs + tr_jobs + ue_jobs + bd_jobs + arc_jobs + pz_jobs + ck_jobs + zp_jobs
-    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in uep and p not in bdts and p not in arcs and p not in pkzs and p not in cpks and p not in zips]
+    big += pak_jobs + tr_jobs + ue_jobs + bd_jobs + td_jobs + arc_jobs + pz_jobs + ck_jobs + zp_jobs
+    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in uep and p not in bdts and p not in ttds and p not in arcs and p not in pkzs and p not in cpks and p not in zips]
     with cf.ProcessPoolExecutor(J, initializer=_pool_init, initargs=(common, {}, zdicts)) as ex:
         results += list(ex.map(scan_file, big)) + list(ex.map(scan_file, files, chunksize=16))
     trees, defer = {}, []
@@ -1850,7 +1941,8 @@ def main():
                                             ('MSHD', any('#MSHD#' in r[4] for r in rows)), ('GLSLC', any('#GLSLC@' in r[4] for r in rows)), ('RE Engine SDF', any('#SDF#' in r[4] for r in rows)),
                                             ('MT Framework SPK', any('#MTSPK@' in r[4] for r in rows)), ('MonoGame MGFX', any('#MGFX@' in r[4] for r in rows)),
                                             ('PlatinumGames shader objects', any('#PGSO' in r[4] for r in rows)),
-                                            ('Unreal Engine shader code archives', any('#UE' in r[4] for r in rows))) if hit)
+                                            ('Unreal Engine shader code archives', any('#UE' in r[4] for r in rows)),
+                                            ('control sections with their code area before them (main, TT Games DAT archives)', any('#RAW@' in r[4] or '#TT@' in r[4] for r in rows))) if hit)
         f.write(f'# kind: evidence  {NOTE} ({kinds} in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)\n')
         f.write('# column 5 records where each key first appears; this game has no PC version to pair with\n')
         f.write('package\tindex\tstage\tdm_ctl_sha16\tsource\n')
