@@ -39,6 +39,9 @@ shader_note	LEGO® Star Wars™: The Skywalker Saga shaders
 mem_used	0xcdbc000
 
 # ---- Graphics ----
-# the game streams its textures into one 1.4 GB pool by CPU writes after nvnTextureInitialize (DM_NVN_TEXINFO=1024x1024: storage still zero at the first use of most), with or without a flush
+# the game reads texture files into one 1.4 GB pool and makes textures over the data (tex_init_upload), writes some by CPU after nvnTextureInitialize (tex_flush_upload, tex_dirty_upload) and
+# fills the others by CopyBufferToTexture; its memory manager moves textures about in the pool with CopyBufferToBuffer, which loses what only the GPU copy put in (tex_copy_mirror)
 tex_flush_upload	on
 tex_dirty_upload	on
+tex_init_upload	on
+tex_copy_mirror	on

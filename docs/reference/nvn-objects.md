@@ -25,6 +25,22 @@ The game allocates NVN objects with the sizes of *its* SDK's headers, which shra
 - **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md) (SDK 12.3.6).
 - **Check:** `DM_NVN_PASSDUMP`'s `B … cb reg` lines: distinct addresses and sizes of the right order, `f=` values that are plausible (screen size, 1/width).
 
+### A texture's content only went in through a GPU copy, and the game moves its textures about in the pool (`tex_copy_mirror`)
+
+- **Symptom:** menus and dialogs show their frames and fills but no text, no button icons and no pictures; the glyph atlas (`texraw`, `memdump` of the storage `texlist` prints) is all zeros, or holds the right picture shifted by a few KB (`0x800`, `0x5800`) so that letters come out cut in bands; the log has no `[RED]` line. `DM_NVN_TEXINFO`-style logs of `nvnTextureInitialize` show the same `NVNtexture` object finalized and initialized again every second or so at a slightly higher pool address, with the same size.
+- **Cause:** LEGO Star Wars: The Skywalker Saga fills a texture by `nvnCommandBufferCopyBufferToTexture` from a staging buffer; the host copied into the `MTLTexture` and left the pool memory as it was (zeros). The game's memory manager (`NuGfxMem`) then slides textures through the pool: it copies the bytes with `nvnCommandBufferCopyBufferToBuffer` and initializes the same `NVNtexture` at the new address. On the Switch the copy moved the texture's real content; the host moved zeros, and the new texture, uploaded from its pool storage, was empty or (when the move overlapped the old range) a stale, shifted copy.
+- **Fix:** profile key `tex_copy_mirror on` (needs `tex_dirty_upload`): `copy_b2t` carries a copy into a plain sampled texture out as a WriteTexels (`nvn_b2t_mirror` in `hle_nvn.c`, so the pool holds the texture and the dirty-page tracking knows), and `mtl_sub_copy` does every buffer copy on the CPU (`memmove` after `dm_guest_write_prepare`) instead of on the GPU, which would write the pool without the tracker seeing it. The texture is uploaded from the pool when it is sampled.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md) (SDK 12.3.6).
+- **Check:** `DM_CTL=<file>` with `texlist 1` and `memdump <storage> <size> <file>`: the dump decodes (block-linear, [`deswz.py`-style](../agents/05-debugging.md)) to the atlas; `texraw <serial>[@level] <file>` (the GPU's copy) equals it. The menus have text.
+
+### A texture initialized over data the game already read into the pool (`tex_init_upload`)
+
+- **Symptom:** a loading screen's picture and the first menus show white or empty areas although the game read the textures' files at boot; `DM_NVN_TEXINFO=WxH` lists textures with `non-zero` storage at `TEXINFO` time that the host never uploaded.
+- **Cause:** the game reads a texture file straight into its pool and makes the `NVNtexture` over the bytes afterwards; the host uploaded only textures the CPU wrote *after* the initialization (`tex_dirty_upload`).
+- **Fix:** `tex_init_upload on` (needs `tex_dirty_upload`): `ft_add` (`hle_nvn.c`) marks a texture whose storage holds data at initialization as CPU-written, so its first use uploads it.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md).
+- **Check:** the loading screen shows its key art.
+
 ### Inlined SDK code writes into `NVNcommandBuffer` +0x10
 
 The game may also write into an NVN object directly, without an NVN call, through code inlined from the SDK headers. Host records stored in place must leave those bytes alone (the same holds for recorded command memory: [Recorded commands patched in place by the game (`OP_BIND_TEX1`)](#recorded-commands-patched-in-place-by-the-game-op_bind_tex1)).

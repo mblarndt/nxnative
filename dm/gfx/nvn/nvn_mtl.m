@@ -414,7 +414,7 @@ void mtl_init(void) {
     }
     g_ev = [g_dev newSharedEvent];
     g_keep = [NSMutableArray array];
-    g_nvn_deswz_gpu = nvn_deswz_gpu_init(g_dev) == 0;
+    g_nvn_deswz_gpu = !getenv("DM_NVN_DESWZ_CPU") && nvn_deswz_gpu_init(g_dev) == 0;   // DM_NVN_DESWZ_CPU=1 (diagnostic): swizzled textures are deswizzled on the CPU, to tell a GPU kernel fault from a stale upload
     dm_res_report_register(mtl_res_counts);
     if (!g_nvn_deswz_gpu) MLOG("[RED] GPU deswizzle init failed; swizzled textures fall back to the CPU");
     MLOG("Metal device %s", g_dev.name.UTF8String);
@@ -966,11 +966,16 @@ static id<MTL4ComputeCommandEncoder> blit(void) {
     return e;
 }
 
+void dm_guest_write_prepare(void *addr, size_t len);   // crash.c
 void mtl_sub_copy(uint64_t src, uint64_t dst, uint64_t n) {
     pend_add(dst, n, 2); g_mdx_epoch++;
     void *sb, *db; uint64_t so, dof;
     if (!mtl_addr(src, n, &sb, &so) || !mtl_addr(dst, n, &db, &dof))
         MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+    if (DM_GAME_TEX_COPY_MIRROR) {   // see b2t_mirror: the game moves its textures about in the pool with buffer copies, and the copy has to reach the memory the host uploads a texture from (and tell the dirty-page tracking)
+        uint8_t *sp = (uint8_t *)((__bridge id<MTLBuffer>)sb).contents, *dp = (uint8_t *)((__bridge id<MTLBuffer>)db).contents;
+        if (sp && dp) { dm_guest_write_prepare(dp + dof, (size_t)n); memmove(dp + dof, sp + so, (size_t)n); return; }
+    }
     if (src != dst && src < dst + n && dst < src + n) { static int once;   // Metal leaves an overlapping copy undefined; seen only in Cuphead while its pool allocator gave out overlapping blocks (hle_nvn.c zcull_size)
         if (!once++) MLOG("[RED] buffer copy with overlapping source and destination (src %#llx dst %#llx, %llu bytes): the result is undefined", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
     enc_b_copy_buffer(blit_buf(src, src + n, dst, dst + n), (__bridge id<MTLBuffer>)sb, so, (__bridge id<MTLBuffer>)db, dof, n);
@@ -3956,9 +3961,12 @@ static void img_fit_upgrade(void) {
 }
 // The same view, in the texture's own class, for a swizzled view (the channel mapping of tex_by_id): Metal gives a swizzled view only the read usage (a base of usage 0x7, a view of 0x1),
 // so an RGBX8 or RGB565 image was bound as the dummy and its writes were lost. An image takes no channel mapping, as a Vulkan storage image view must have the identity swizzle
+// Whether a shader reading an image as class dpf needs another view of a texture of this Metal format: integer images read as another integer class, and as float: the Switch's float view of an integer
+// image reads its 32 bits as they are (LEGO Star Wars: The Skywalker Saga's luminance histogram reads its own bin counts through a texture_buffer<float> of the R32 integer buffer image)
+static int img_cls_mismatch(MTLPixelFormat pf, int dpf) { int c = mtl_pf_dpf(pf); return dpf == NVN_DPF_FLOAT ? c == NVN_DPF_UINT || c == NVN_DPF_SINT : c != dpf; }
 static id<MTLTexture> img_fit(int tid, id<MTLTexture> t, int dpf, uint64_t *rid) {
-    size_t n = mtl_pf_bytes(t.pixelFormat); int u = dpf == NVN_DPF_UINT, cls = dpf != NVN_DPF_FLOAT && mtl_pf_dpf(t.pixelFormat) != dpf;
-    MTLPixelFormat pf = !cls ? t.pixelFormat : n == 1 ? (u ? MTLPixelFormatR8Uint : MTLPixelFormatR8Sint) : n == 2 ? (u ? MTLPixelFormatR16Uint : MTLPixelFormatR16Sint) : n == 4 ? (u ? MTLPixelFormatR32Uint : MTLPixelFormatR32Sint)
+    size_t n = mtl_pf_bytes(t.pixelFormat); int u = dpf == NVN_DPF_UINT, cls = img_cls_mismatch(t.pixelFormat, dpf);
+    MTLPixelFormat pf = !cls ? t.pixelFormat : dpf == NVN_DPF_FLOAT ? (n == 4 ? MTLPixelFormatR32Float : n == 2 ? MTLPixelFormatR16Float : MTLPixelFormatInvalid) : n == 1 ? (u ? MTLPixelFormatR8Uint : MTLPixelFormatR8Sint) : n == 2 ? (u ? MTLPixelFormatR16Uint : MTLPixelFormatR16Sint) : n == 4 ? (u ? MTLPixelFormatR32Uint : MTLPixelFormatR32Sint)
                       : n == 8 ? (u ? MTLPixelFormatRG32Uint : MTLPixelFormatRG32Sint) : n == 16 ? (u ? MTLPixelFormatRGBA32Uint : MTLPixelFormatRGBA32Sint) : MTLPixelFormatInvalid;
     id<MTLTexture> base = t.parentTexture ? t.parentTexture : t;
     if (pf == MTLPixelFormatInvalid || tid <= 0 || tid >= g_ntreg) {
@@ -5744,7 +5752,7 @@ static id<MTLTexture> img_binding(int tid, const nvn_rbind *b, uint64_t *rid, in
     id<MTLTexture> t = (__bridge id<MTLTexture>)tv;
     int swz_only = t && !(t.usage & MTLTextureUsageShaderWrite) && (t.parentTexture.usage & MTLTextureUsageShaderWrite);
     if (t && !(t.usage & MTLTextureUsageShaderWrite) && !swz_only) { RED_ONCE(32, "texture bound to an image slot lacks the shader-write usage (texture ID %d)", tid); t = nil; }
-    if (t && (swz_only || (b->dpf != NVN_DPF_FLOAT && mtl_pf_dpf(t.pixelFormat) != b->dpf))) {
+    if (t && (swz_only || img_cls_mismatch(t.pixelFormat, b->dpf))) {
         uint64_t r2 = 0; id<MTLTexture> v = img_fit(tid, t, b->dpf, &r2);
         if (v) { t = v; *rid = r2; } else if (swz_only) t = nil;
     }
@@ -5753,7 +5761,7 @@ static id<MTLTexture> img_binding(int tid, const nvn_rbind *b, uint64_t *rid, in
     return t;
 }
 static int imga_extent(id<MTLTexture> t, const nvn_rbind *b, uint64_t *bytes) {
-    if (!t || t.textureType != (MTLTextureType)b->dtt || t.sampleCount > 1) return 0;
+    if (!t || (t.textureType != (MTLTextureType)b->dtt && t.textureType != MTLTextureTypeTextureBuffer) || t.sampleCount > 1) return 0;   // a buffer texture also fits a texture_buffer image, whose type the reflection does not name (nvn_refl.m dummy_kind): LEGO Star Wars: The Skywalker Saga's compute passes
     if (t.textureType != MTLTextureTypeTextureBuffer && t.textureType != MTLTextureType2D && t.textureType != MTLTextureType2DArray) return 0;
     return nvn_imga_bytes(t.width, t.textureType == MTLTextureTypeTextureBuffer ? 1 : t.height,
                           t.textureType == MTLTextureType2DArray ? t.arrayLength : 1, bytes);
@@ -5834,11 +5842,12 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
     uint64_t atomic_rid[32] = {0}; int atomic_real[32] = {0};
     const nvn_rbind *atomic_desc[32] = {0};
     for (int i = 0; i < sh->rf.nb; i++) if (sh->rf.b[i].kind == NVN_RB_IMGA) {
-        unsigned r = sh->rf.b[i].reg; const nvn_rbind *ib = NULL;
+        unsigned r = sh->rf.b[i].reg; const nvn_rbind *ib = NULL, *fl = NULL; int nint = 0, nfl = 0;
         for (int j = 0; j < sh->rf.nb; j++) if (sh->rf.b[j].kind == NVN_RB_IMG && sh->rf.b[j].reg == r) {
-            if (ib) MDIE("[RED] image atomics: ambiguous IMG partner (shader %s stage %d slot %u)", sh->key, nvn_stage, r);
-            ib = &sh->rf.b[j];
+            if (sh->rf.b[j].dpf == NVN_DPF_FLOAT) { fl = &sh->rf.b[j]; nfl++; } else { ib = &sh->rf.b[j]; nint++; }   // a float view of the same image (Unreal's float buffer images; LEGO Star Wars: The Skywalker Saga's compute passes) is no partner: the atomics are on the integer one
         }
+        if (nint > 1 || (!nint && nfl > 1)) MDIE("[RED] image atomics: ambiguous IMG partner (shader %s stage %d slot %u)", sh->key, nvn_stage, r);
+        if (!ib) ib = fl;
         if (r >= 32 || !ib) MDIE("[RED] image atomics: missing IMG partner (shader %s stage %d slot %u)", sh->key, nvn_stage, r);
         if (!atomic_desc[r]) {
             int tid = (int)(S.img[nvn_stage][r] & 0xfffff); atomic_desc[r] = ib;
@@ -5920,8 +5929,9 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
         } else if (b->kind == NVN_RB_IMG) {   // Writable texture: NVN image slot r (BindImages) ↔ D3D u_r
             int tid = reg < 32 ? (int)(S.img[nvn_stage][reg] & 0xfffff) : 0;
             uint64_t trid; int real;
-            id<MTLTexture> t = reg < 32 && atomic_desc[reg] ? atomic_img[reg] : img_binding(tid, b, &trid, &real);
-            if (reg < 32 && atomic_desc[reg]) { trid = atomic_rid[reg]; real = atomic_real[reg]; }
+            int partner = reg < 32 && atomic_desc[reg] == b;   // the integer image of an image atomic (a float view of the same slot is bound as itself)
+            id<MTLTexture> t = partner ? atomic_img[reg] : img_binding(tid, b, &trid, &real);
+            if (partner) { trid = atomic_rid[reg]; real = atomic_real[reg]; }
             if (passdump()) PD("W %llu st%d reg%d tid=%d %s ser=%llu", g_stat_pass, nvn_stage, reg, tid, real ? "real" : "dummy", real && tid < g_ntreg ? g_treg[tid].t.serial : 0ull);
             slots[aid] = trid;
             USE(t, MTLResourceUsageRead | MTLResourceUsageWrite);
@@ -5930,7 +5940,9 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
             const tex_t *tt = tid && tid < g_ntreg && g_treg[tid].ok ? &g_treg[tid].t : NULL;
             id<MTLTexture> image = atomic_img[reg]; uint64_t need;
             if (!imga_extent(image, atomic_desc[reg], &need))
-                MDIE("[RED] image atomics: unsupported or overflowing IMG extent (shader %s stage %d slot %d texture %d)", sh->key, nvn_stage, reg, tid);
+                MDIE("[RED] image atomics: unsupported or overflowing IMG extent (shader %s stage %d slot %d texture %d: host texture %s type %d %lux%lu x%lu samples %lu, binding wants type %d; guest %s target %d %ux%u format %#x flags %#x)", sh->key, nvn_stage, reg, tid,
+                     image ? "present" : "none", image ? (int)image.textureType : -1, image ? (unsigned long)image.width : 0ul, image ? (unsigned long)image.height : 0ul, image ? (unsigned long)image.arrayLength : 0ul, image ? (unsigned long)image.sampleCount : 0ul, (int)atomic_desc[reg]->dtt,
+                     tt ? "registered" : "none", tt ? tt->d.target : -1, tt ? tt->d.width : 0u, tt ? tt->d.height : 0u, tt ? tt->d.format : 0, tt ? tt->d.flags : 0);
             if (tt && (!atomic_real[reg] || (image.pixelFormat != MTLPixelFormatR32Uint && image.pixelFormat != MTLPixelFormatR32Sint)))
                 MDIE("[RED] image atomics: real image is not a resolved R32 integer IMG (shader %s stage %d slot %d texture %d)", sh->key, nvn_stage, reg, tid);
             int linear = tt && (tt->d.target == NVN_TEXTURE_TARGET_BUFFER || (tt->d.flags & (NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET)));
@@ -5940,17 +5952,18 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
                 int found = tt->mem && mtl_gpu_addr((uint64_t)tt->mem, need, &mb, &mo, &gpu);
                 storage = (__bridge id<MTLBuffer>)mb;
                 int bw, bh, bpb = nvn_fmt_bpb(tt->d.format, &bw, &bh);
-                // Only actual base buffer textures / packed base 2D images have a proven pointer layout.
+                // Only actual base buffer textures / packed base 2D images have a proven pointer layout (a buffer texture viewed as another pixel format is the same memory: the pointer comes from the pool, not from the view).
                 nvn_imga_direct_layout d = { .width = image.width, .height = image.height, .layers = image.arrayLength,
                     .row_bytes = image.buffer ? image.bufferBytesPerRow : 0, .buffer_length = storage.length,
                     .texture_offset = image.buffer ? image.bufferOffset : 0, .pointer_offset = mo, .guest_bytes = tt->L.size,
                     .word_bytes = bw == 1 && bh == 1 ? (unsigned)bpb : 0, .buffer_texture = image.textureType == MTLTextureTypeTextureBuffer,
-                    .base_view = !image.parentTexture && image.mipmapLevelCount == 1 && tt->d.levels <= 1 && tt->d.samples <= 1 &&
+                    .base_view = (image.textureType == MTLTextureTypeTextureBuffer || !image.parentTexture) && image.mipmapLevelCount == 1 && tt->d.levels <= 1 && tt->d.samples <= 1 &&
                         image.width == tt->d.width && (image.textureType == MTLTextureTypeTextureBuffer ? tt->d.target == NVN_TEXTURE_TARGET_BUFFER :
                         image.textureType == MTLTextureType2D && tt->d.target == NVN_TEXTURE_TARGET_2D && image.height == tt->d.height),
                     .same_buffer = found && image.buffer == storage };
                 if (!gpu || !nvn_imga_direct_ok(&d))
-                    MDIE("[RED] image atomics: unsupported direct IMG/IMGA layout or capacity (shader %s stage %d slot %d texture %d)", sh->key, nvn_stage, reg, tid);
+                    MDIE("[RED] image atomics: unsupported direct IMG/IMGA layout or capacity (shader %s stage %d slot %d texture %d: %llux%llu x%llu row %llu, buffer length %llu, texture offset %llu, pointer offset %llu, guest bytes %llu, word %u, buffer texture %d, base view %d, same buffer %d (found %d))", sh->key, nvn_stage, reg, tid,
+                         (unsigned long long)d.width, (unsigned long long)d.height, (unsigned long long)d.layers, (unsigned long long)d.row_bytes, (unsigned long long)d.buffer_length, (unsigned long long)d.texture_offset, (unsigned long long)d.pointer_offset, (unsigned long long)d.guest_bytes, d.word_bytes, d.buffer_texture, d.base_view, d.same_buffer, found);
                 static int nlog; if (nlog < 8 && !(sh->logged & 2)) { sh->logged |= 2; nlog++; MLOG("shader %s (stage %d): image atomics on image slot %d, texture ID %d (target %d, %llu bytes)", sh->key, nvn_stage, reg, tid, (int)tt->d.target, (unsigned long long)tt->L.size); }
             } else if (tt) {
                 RED_ONCE(93, "image atomics on a block-linear texture (texture ID %d target %d): not followed, the atomics go to a scratch buffer", tid, (int)tt->d.target);
@@ -8747,8 +8760,27 @@ void mtl_read_texels(const tex_t *t, unsigned level, unsigned layer0, const NVNc
     for (int z = 0; z < nz; z++) for (size_t y = 0; y < hb; y++) memcpy(dst + z * img + y * row, (uint8_t *)buf.contents + z * wb * hb + y * wb, wb);
     }
 }
+// Profile key tex_copy_mirror: a buffer→texture copy into a plain sampled texture is carried out as a WriteTexels, so the pool memory holds the texture afterwards, as it does on the Switch.
+// LEGO Star Wars: The Skywalker Saga moves its textures about in the pool (its memory manager finalizes a texture and initializes the same object again at another offset, copying the bytes
+// of the pool): a texture whose content only ever went in through the GPU copy came out of every move as zeros (no text in the menus). The texture is uploaded from the pool when it is sampled
+void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img);   // hle_nvn.c
+static int b2t_mirror(const p_copy_b2t *c) {
+    const tex_t *t = c->tex;
+    if (!t || !t->mem || !t->pool || (t->pool->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) || t->d.samples > 1 || mtl_tex_gpu_owned(t->serial)
+        || (t->d.flags & (NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_IMAGE | NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET))) return 0;
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+    if (!bpb) return 0;
+    size_t row = S.copy_stride ? (size_t)S.copy_stride : (size_t)((c->r.width + bw - 1) / bw) * bpb;
+    size_t rows = (c->r.height + bh - 1) / bh, img = S.copy_img_stride ? (size_t)S.copy_img_stride : row * rows;
+    int nz = c->r.depth ? c->r.depth : 1;
+    void *mb; uint64_t mo;
+    if (!mtl_addr(c->src, img * nz, &mb, &mo)) return 0;
+    nvn_b2t_mirror(t, c->has_view ? &c->view : NULL, &c->r, (const uint8_t *)((__bridge id<MTLBuffer>)mb).contents + mo, (size_t)S.copy_stride, (size_t)S.copy_img_stride);
+    return 1;
+}
 static void copy_b2t(const p_copy_b2t *c) {
     if (c->tex) zskip_del(c->tex->serial);
+    if (DM_GAME_TEX_COPY_MIRROR && b2t_mirror(c)) return;
     id<MTLTexture> t = tex_mtl(c->tex);
     if (!t) { PD("C ser=%llu (no host texture)", c->tex->serial); return; }
     int bw, bh, bpb = nvn_fmt_bpb(c->tex->d.format, &bw, &bh);
@@ -9531,16 +9563,18 @@ void td_note_layer(id<MTLTexture> t, uint64_t ser, NSUInteger lv, NSUInteger sl)
 // The next frame's targets, on request (the Mac's DM_CTL "texdump <path>", hle_hid.c): the path is kept (strdup), the frame number is the one after the current
 // The Mac's DM_CTL "texraw <serial> <path>" (hle_hid.c): level 0 / slice 0 of the host texture behind a serial, raw, after the GPU finishes (header line: width height Metal format bytes per row);
 // for a texture that is no render target (a default texture, a lookup table) whose content a shader depends on
-void dm_gfx_texraw(uint64_t serial, const char *path) {
+void dm_gfx_texraw(uint64_t serial, const char *path, unsigned level) {
     __unsafe_unretained id o = tex_get(serial);
+    if ([o isKindOfClass:[NvPkg class]]) o = ((NvPkg *)o)->tex;   // an uploaded packaged texture: what the GPU holds now
     if (!o || ![o conformsToProtocol:@protocol(MTLTexture)]) { MLOG("[texraw] ser=%llu: no host texture", (unsigned long long)serial); return; }
     id<MTLTexture> t = o; mtl_finish_gpu();
     if (t.storageMode == MTLStorageModeMemoryless || t.pixelFormat == MTLPixelFormatInvalid) return;
-    NSUInteger w = t.width, h = t.height, row = w * 16, sz = row * h;   // 16 bytes a texel: a multiple of every uncompressed texel size
+    if (level >= t.mipmapLevelCount) level = 0;
+    NSUInteger w = MAX(t.width >> level, 1u), h = MAX(t.height >> level, 1u), row = w * 16, sz = row * h;   // 16 bytes a texel: a multiple of every uncompressed texel size
     id<MTLBuffer> buf = [g_dev newBufferWithLength:sz options:MTLResourceStorageModeShared];
     id<MTLCommandBuffer> cb = q_cb(); id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
     MTLBlitOption bo = t.pixelFormat == MTLPixelFormatDepth32Float_Stencil8 ? MTLBlitOptionDepthFromDepthStencil : MTLBlitOptionNone;
-    [b copyFromTexture:t sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:0 destinationBytesPerRow:row destinationBytesPerImage:sz options:bo];
+    [b copyFromTexture:t sourceSlice:0 sourceLevel:level sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:0 destinationBytesPerRow:row destinationBytesPerImage:sz options:bo];
     [b endEncoding]; [cb commit]; [cb waitUntilCompleted];
     FILE *f = fopen(path, "wb"); if (f) { fprintf(f, "%lu %lu %lu %lu\n", (unsigned long)w, (unsigned long)h, (unsigned long)t.pixelFormat, (unsigned long)row); fwrite(buf.contents, 1, sz, f); fclose(f); }
     const uint8_t *p = buf.contents;

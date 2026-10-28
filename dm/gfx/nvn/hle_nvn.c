@@ -333,6 +333,9 @@ static void ft_add(const tex_t *t) {
     uint64_t st = nvn_dirty_now(); if (DM_GAME_TEX_DIRTY_UPLOAD) nvn_dirty_protect(t->mem, t->L.size);   // see nvn_ft_written
     g_ft[g_nft++] = (flush_tex){t->mem, t->L.size, *t, st, nvn_dirty_span(t->mem, t->L.size)};
     pthread_mutex_unlock(&g_ft_mu);
+    // Profile tex_init_upload: LEGO Star Wars: The Skywalker Saga reads a texture file straight into the pool and makes the texture over it afterwards, so no write comes after the registration and the
+    // dirty pages never mark it: the texture stayed a GPU texture of zeros (every menu text and icon). Storage that holds data at initialization is the texture's content, as NVN keeps a pool's bytes
+    if (DM_GAME_TEX_INIT_UPLOAD) { const uint64_t *w = (const uint64_t *)t->mem; size_t n = t->L.size / 8, i = 0; while (i < n && !w[i]) i++; if (i < n) mtl_tex_cpu_written(t); }
 }
 static void ft_del(uint64_t serial) {
     if (!DM_GAME_TEX_FLUSH_UPLOAD || !serial) return;
@@ -585,12 +588,19 @@ static void pk_drop(const void *p) {
     pthread_mutex_unlock(&g_pk_mu);
 }
 // mapped = 1: computed only when the code area is in a registered memory pool (at SetShaders: Mario sets some programs with an unmapped address first and fills it in before the first draw)
+static int mem_ok(uint64_t a, uint64_t n) {   // the first and last bytes read through the kernel: a stage entry the game left unset points anywhere (LEGO Star Wars: The Skywalker Saga: a control pointer of 1, ASCII for a code pointer)
+    uint8_t b[4]; vm_size_t got = 0;
+    return a && n && !vm_read_overwrite(mach_task_self(), a, 4, (vm_address_t)b, &got) && got == 4 && !vm_read_overwrite(mach_task_self(), a + n - 4, 4, (vm_address_t)b, &got) && got == 4;
+}
+static int ctl_readable(const void *c) { return mem_ok((uint64_t)(uintptr_t)c, 0x708); }   // up to the code size at +0x704: a section can be shorter than 0x880 bytes and end a mapping
+static uint32_t ctl_len(const void *c) { uint32_t own; memcpy(&own, (const uint8_t *)c + 0x20, 4); return own >= 0x760 && own < 0x880 ? own : 0x880; }   // what keys_hash reads of it
 static int keys_hash(const NVNshaderData *sd, int mapped, uint8_t out[8]) {
     uint32_t ncode = 0; void *mb; uint64_t mo;
-    if (!sd->control) return 0;
+    if (!ctl_readable(sd->control)) return 0;
     memcpy(&ncode, (const uint8_t *)sd->control + 0x704, 4);
     int code = sd->data && ncode && ncode < (1u << 24);
     if (mapped && !(code && mtl_addr(sd->data, ncode, &mb, &mo))) return 0;
+    if (code && !mem_ok(sd->data, ncode)) return 0;
     // Control +0x20 holds the section's own length: sections of at least 0x880 bytes (all of Mario's, Engage's, Dread's and 13 Sentinels') use the first 0x880; SDK 10's 3D World has 0x850-byte ones followed by other data, so only their own length is used (shader_split.py ctl_len)
     uint32_t nctl = 0x880, own; memcpy(&own, (const uint8_t *)sd->control + 0x20, 4);
     if (own >= 0x760 && own < 0x880) nctl = own;
@@ -617,8 +627,9 @@ NVN(nvnProgramSetShaders, NVNboolean, NVNprogram *p, int n, const NVNshaderData 
     k->ok = 0;
     for (int i = 0; i < n; i++) {
         if (keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
-        // DM_NVN_SHDUMP (debugging): keep a copy of the control section so the replay layer can save shaders missing from the map (never freed)
-        if (dump && sd[i].control) { void *c = malloc(0x880); memcpy(c, sd[i].control, 0x880); o->sd[i].control = c; }
+        // DM_NVN_SHDUMP (debugging): keep a copy of the control section so the replay layer can save shaders missing from the map (never freed). So does a stage whose key is not known yet (its code area was not in a pool):
+        // the key is made at the first use (prog_key), when the game's control section may be gone (LEGO Star Wars: The Skywalker Saga builds some on its stack: a crash in keys_hash, and a key of other bytes)
+        if ((dump || !(k->ok >> i & 1)) && ctl_readable(sd[i].control) && mem_ok((uint64_t)(uintptr_t)sd[i].control, ctl_len(sd[i].control))) { void *c = calloc(1, 0x880); memcpy(c, sd[i].control, ctl_len(sd[i].control)); o->sd[i].control = c; }
     }
     OLOG("ProgramSetShaders %p n=%d data0=%#llx", (void *)p, n, n ? (unsigned long long)sd[0].data : 0ull);
     return 1;
@@ -2456,6 +2467,8 @@ NVN(nvnTextureWriteTexels, void, const NVNtexture *t, const NVNtextureView *v, c
 NVN(nvnTextureWriteTexelsStrided, void, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r, const void *src, ptrdiff_t row, ptrdiff_t img) {
     write_texels(CTX(t), (const view_t *)v, r, src, (size_t)row, (size_t)img);
 }
+// A buffer→texture copy replayed as a WriteTexels (nvn_mtl.m copy_b2t, profile key tex_copy_mirror): the pool memory holds the texture afterwards, as it does on the Switch, where the copy writes the storage
+void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) { write_texels(t, v, r, src, row, img); }
 // The movie decoder's native-texture output (DecoderMode 2, hle_movie.c): a whole frame into level 0 of the client texture, as WriteTexels does; returns the texture format, or −1 when the object is not a texture
 int nvn_host_write_texture(const void *nvntex, const void *src, int w, int h, size_t row, int *tw, int *th) {
     const tex_t *t = nvntex;

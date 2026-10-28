@@ -119,6 +119,10 @@ def header(g):
     if tfu not in ('on', 'off'): sys.exit(f'{g.id}: tex_flush_upload must be on or off: {tfu}')
     tdu = g.get('tex_dirty_upload', 'off')   # with tex_flush_upload: a registered texture the CPU writes after init without any flush is uploaded too (dirty pages, hle_nvn.c nvn_ft_written): on / off
     if tdu not in ('on', 'off') or (tdu == 'on' and tfu != 'on'): sys.exit(f'{g.id}: tex_dirty_upload must be on or off, and needs tex_flush_upload on: {tdu}')
+    tiu = g.get('tex_init_upload', 'off')   # with tex_dirty_upload: a texture whose storage already holds data when it is initialized (the game read the file into the pool first) is uploaded from it (hle_nvn.c ft_add): on / off
+    if tiu not in ('on', 'off') or (tiu == 'on' and tdu != 'on'): sys.exit(f'{g.id}: tex_init_upload must be on or off, and needs tex_dirty_upload on: {tiu}')
+    tcm = g.get('tex_copy_mirror', 'off')   # with tex_dirty_upload: buffer copies and buffer→texture copies into plain sampled textures are carried out on the CPU, so the pool memory holds the textures (nvn_mtl.m copy_b2t, mtl_sub_copy): on / off
+    if tcm not in ('on', 'off') or (tcm == 'on' and tdu != 'on'): sys.exit(f'{g.id}: tex_copy_mirror must be on or off, and needs tex_dirty_upload on: {tcm}')
     zdp = g.get('zero_dynamic_pools', 'off')   # a CPU-uncached, GPU-cached memory pool (flags 0x22) starts as zeros (hle_nvn.c MemoryPoolInitialize), as memory the kernel just handed over would: on / off
     if zdp not in ('on', 'off'): sys.exit(f'{g.id}: zero_dynamic_pools must be on or off: {zdp}')
     tds = g.get('tex_dyn_slots', 'off')   # shaders whose texture handle the translator could not trace to one slot: slot indices in c2, the bound slots in the fallback arrays (nvn_mtl.m): on / off
@@ -173,6 +177,8 @@ def header(g):
          f'#define DM_GAME_RENDER_COND {int(rcd == "on")}',
          f'#define DM_GAME_ZERO_DYNAMIC_POOLS {int(zdp == "on")}',
          f'#define DM_GAME_TEX_DIRTY_UPLOAD {int(tdu == "on")}',
+         f'#define DM_GAME_TEX_INIT_UPLOAD {int(tiu == "on")}',
+         f'#define DM_GAME_TEX_COPY_MIRROR {int(tcm == "on")}',
          f'#define DM_GAME_TEX_DYN_SLOTS {int(tds == "on")}',
          f'#define DM_GAME_GPU_TS_SEGMENT {int(gts == "segment")}',
          f'#define DM_GAME_VCONV_RANGE {int(vcr == "on")}',

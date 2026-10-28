@@ -637,6 +637,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Found on:** [Octopath Traveler 0](../../dm/games/01005270232F2000/README.md): 2,084 such shaders (Unreal's GPU particles); three ran in the first 100 seconds. [Pokémon Legends: Z-A](../../dm/games/0100F43008C44000/README.md): in the 64 KB dummy buffer used before, its atomic max into a 480x270 r32ui 2D array (fragment shader `2bd5037003980716`, the scene after the story opening's first cutscene) ran about 1.4 MB past its end, writing into zero-copy pools over the game's heap and into unmapped addresses (GitHub issue #101).
 - **Note:** Metal shader validation (`MTL_SHADER_VALIDATION=1`) stops out-of-bounds accesses, so under it the scene played.
 
+### An image the shader reads as integers, atomically and as floats (`IMGA` with two `IMG` views)
+
+- **Symptom:** the game aborts at its first 3D scene with `FATAL [RED] image atomics: ambiguous IMG partner (shader … stage 5 slot 0)`; after that is relaxed, `unsupported or overflowing IMG extent … host texture type 9 … binding wants type 2`, then `unsupported direct IMG/IMGA layout or capacity … base view 0`.
+- **Cause:** LEGO Star Wars: The Skywalker Saga's luminance-histogram compute pass (`cs_main`, 36 words in a buffer texture of format R32) declares the one image three times: `texture_buffer<uint>`, the `device atomic_uint*` pointer, and `texture_buffer<float>`. All three are `img` bindings of slot 0, so the host found two `IMG` partners for the atomics; its reflection names no type for `texture_buffer` (`dtt` stays 2D), so a real buffer texture failed the type check; and a buffer texture seen through another pixel format (the float image read as integers) has a parent texture, which the direct-layout check refused.
+- **Fix:** the atomics' partner is the integer view, the float view is no partner and is bound as itself (`encode_args_`); `imga_extent` accepts a buffer texture for a binding whose type the reflection leaves as 2D; a buffer texture needs no missing parent for the direct layout (`base_view`), as the pointer comes from the pool, not from the view.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md): the intro's 3D scene.
+- **Check:** the log line `shader 13eb6b8ce4a8a49d_b (stage 5): image atomics on image slot 0 … (target 10, 144 bytes)` and a 3D picture.
+
 ### Bounded MSL 2.3 atomic emulation
 
 - **Symptom:** Metal shader validation reports invalid image-atomic stores even with an image-sized scratch buffer; without validation, GPU page faults can freeze rendering.
