@@ -3,6 +3,7 @@
 // (hle_nvn.c); the game sets the values after boot and may set them again, so each is written whenever it differs. Fixed addresses: each row runs only on the main build it was found in (AGENTS.md)
 #include "hle.h"
 #include <mach/mach.h>
+#include <stdatomic.h>
 
 // What a field holds: the frame rate as a float or int32, vsyncs per frame (60 / frame rate) as an int32, or the frame time in milliseconds as a float. Copies: consecutive copies of the value
 // (Unreal keeps one for the game thread, one for the render thread). A row with no pointer (ptr_off 0) has its field at main + field: a constant in main's read-only data, which the loader
@@ -11,10 +12,10 @@
 // period, so frames at exactly 16.667 ms came 0.11 ms late each on the Mac (59.6 fps, every 150th frame shown two vsyncs). Slightly shorter, the host's present pacing sets the pace
 // (the acquire waits): Luigi's Mansion 3's display interval p99 18.69 → 16.67 ms, 60.0 fps. Not at 30: with present_interval display the presents follow every vsync and hold no
 // frame for two, so a shorter time showed some frames for one (30.4 fps); 30 writes the game's own 33.333 ms
-enum { FPS_F32, VSYNCS_I32, MS_F32, FPS_I32 };
+enum { FPS_F32, VSYNCS_I32, MS_F32, FPS_I32, SWAPMODE_I32 };   // SWAPMODE_I32: TT Games' NuVideo swap mode, 1 at 60 fps, 3 at 30
 #define MS_MARGIN 0.5f
 static float ms_want(int fps) { return 1000.0f / (float)fps - (fps == 60 ? MS_MARGIN : 0); }
-static const struct { const char *build, *what; uint64_t ptr_off; uint32_t field; uint8_t kind, copies; } k_locks[] = {
+static const struct { const char *build, *what; uint64_t ptr_off; uint32_t field; uint8_t kind, copies, display; } k_locks[] = {   // display: at 60 fps the presents follow every vsync (dm_fps_lock_display)
     // Pokemon Brilliant Diamond 1.3.0: Unity's Application.targetFrameRate. Its icall registration (main+0xe34e60) resolves to main+0xdc8e70 -> +0x5fa640,
     // which stores w0 at main+0x4afc868; the getter at +0x5fa630 reads the same int32. The game sets 30 when entering the field; display pacing alone does not remove that cap.
     { "94ceae325c205c4b9d6f7235552f28fd", "Unity targetFrameRate", 0, 0x4afc868, FPS_I32, 1 },
@@ -53,11 +54,19 @@ static const struct { const char *build, *what; uint64_t ptr_off; uint32_t field
     // started; the limiter (main+0x7a3e70) runs jobs or sleeps until 33.333 ms have passed, the float at main+0x13c94dc (read only there, at main+0x7a3ea8 and main+0x7a3f18), and the game
     // steps by the time that really passed. The game asks for present interval 2 too, which the profile's present_interval display ignores; both are needed
     { "79e5950ffa85acf63e28c9aec051eac2", "NLG frame limiter target", 0, 0x13c94dc, MS_F32, 1 },
+    // LEGO Star Wars: The Skywalker Saga 1.0.8: TT Games' NuCore keeps its video swap mode in main+0xa9fae80 (NuVideoSetSwapMode main+0x7121b0 stores it; the game sets 3 at boot) and, in nuapi
+    // (main+0xba98128) +0x1f20, the retrace rate (60.0 for modes 1 and 2, 30.0 for mode 3). nttUniverse::GetTargetFrameRate / GetTargetFrameStep read the mode through a table of rates
+    // {60, 60, 30, 60} (main+0xa895b00), so the engine steps by 1/30 s a frame in mode 3 and 1/60 s in mode 1. The game asks the window for present interval 2 (30 fps), which the host
+    // follows only in the game's interval mode: at 60 the presents follow every vsync (the display flag)
+    { "c6901ce5426c704a5f51cfdab4a6c4ff", "NuCore video swap mode", 0, 0xa9fae80, SWAPMODE_I32, 1, 1 },
+    { "c6901ce5426c704a5f51cfdab4a6c4ff", "NuCore retrace rate", 0, 0xba9a048, FPS_F32, 1, 1 },
 };
 #define NLOCKS ((int)(sizeof k_locks / sizeof k_locks[0]))
 
 static int rd(uint64_t a, void *out, size_t n) { vm_size_t got = 0; return a >= 0x1000 && vm_read_overwrite(mach_task_self(), (vm_address_t)a, n, (vm_address_t)out, &got) == KERN_SUCCESS && got == n; }
 
+static _Atomic int g_display60;
+int dm_fps_lock_display(void) { return atomic_load_explicit(&g_display60, memory_order_relaxed); }   // 1: a row at 60 fps needs the presents to follow every vsync, whatever interval the game asks for
 void dm_fps_lock_tick(void) {
     static int state = -2, rows[NLOCKS], nrow, nlog[NLOCKS], target; static uint8_t *base; static const char *src;
     if (state == -1) return;
@@ -70,6 +79,7 @@ void dm_fps_lock_tick(void) {
         if (t != 0 && t != 30 && t != 60) { LOG("[RED] DM_FPS_TARGET=%s: must be 0, 30 or 60; leaving the game's frame limit", e); t = 0; }
         if (!t) { for (int r = 0; r < nrow; r++) LOG("main: %s left as the game sets it (%s)", k_locks[rows[r]].what, src); return; }
         target = t; state = 0;
+        if (t == 60) for (int r = 0; r < nrow; r++) if (k_locks[rows[r]].display) atomic_store(&g_display60, 1);
     }
     for (int r = 0; r < nrow; r++) {
         int k = rows[r]; uint64_t obj = (uint64_t)(uintptr_t)base;
@@ -82,8 +92,8 @@ void dm_fps_lock_tick(void) {
                 if (cur == want || !(ms ? f >= 8 && f <= 100 : f >= 10 && f <= 120)) continue;   // already set, or not set yet (RE Engine: 6000 at boot; Unreal: 0 = no limit until the config sets it)
                 snprintf(was, sizeof was, ms ? "%.3f ms" : "%g", f);
             } else {
-                int fps = k_locks[k].kind == FPS_I32;
-                want = fps ? (uint32_t)target : 60 / (uint32_t)target;
+                int fps = k_locks[k].kind == FPS_I32, swap = k_locks[k].kind == SWAPMODE_I32;
+                want = fps ? (uint32_t)target : swap ? (target == 60 ? 1u : 3u) : 60 / (uint32_t)target;
                 if (cur == want || cur < (fps ? 10u : 1u) || cur > (fps ? 120u : 4u)) continue;
                 snprintf(was, sizeof was, "%u", cur);
             }
@@ -91,6 +101,7 @@ void dm_fps_lock_tick(void) {
             dm_guest_write_prepare(p, sizeof *p); __atomic_store_n(p, want, __ATOMIC_RELAXED);
             if (nlog[k] < 8) { nlog[k]++; char now[24];
                 if (k_locks[k].kind == MS_F32) snprintf(now, sizeof now, "%.3f ms (%d fps)", ms_want(target), target);
+                else if (k_locks[k].kind == SWAPMODE_I32) snprintf(now, sizeof now, "%u (%d fps)", want, target);
                 else snprintf(now, sizeof now, "%u%s", k_locks[k].kind == FPS_F32 ? (unsigned)target : want, k_locks[k].kind == FPS_F32 || k_locks[k].kind == FPS_I32 ? " fps" : " vsyncs");
                 LOG("main: %s%s %s → %s (%s)", k_locks[k].what, k_locks[k].copies > 1 ? (c ? " (render thread)" : " (game thread)") : "", was, now, src); }
         }

@@ -71,6 +71,14 @@ Frame pacing: the host's frame step, engine frame limiters, present intervals an
 - **Check:** before cutting a game's frame limiter, find what sets its target and whether anything else holds those frames. A limiter that also enforces a slower mode (here N = 2) has to keep it.
 - **Found on:** [Taiko Risshiden V DX](../../dm/games/0100346017304000/README.md), in its menus and town; its movies, paced by their own player, ran at 60.
 
+### TT Games' video swap mode: 60 fps in two variables
+
+- **Symptom:** a 30 fps game (LEGO Star Wars: The Skywalker Saga: frame time p50 33.33 ms, the game asks for present interval 2) with no engine setting to raise.
+- **Cause:** TT Games' NuCore keeps its video swap mode in one global (`g_video_swap_mode`, `NuVideoSetSwapMode` stores it; the Switch build sets 3 at boot) and the retrace rate in `nuapi` +0x1f20 (60.0 for modes 1 and 2, 30.0 for mode 3). `nttUniverse::GetTargetFrameRate` and `GetTargetFrameStep` read the mode through a table of rates {60, 60, 30, 60}, so the engine steps by 1/30 s a frame in mode 3 and by 1/60 s in mode 1 (a `SettingScreenFPSTarget` setting screen is in the binary too). The game's window asks for present interval 2, which the host follows in its game interval mode.
+- **Fix:** two rows in `hle_fpslock.c` (`NuCore video swap mode`, kind `SWAPMODE_I32`: 1 at 60, 3 at 30; `NuCore retrace rate`, `FPS_F32`), run on every present like the others, and a `display` flag: at 60 the rows make `dm_fps_lock_display()` return 1, and `hle_nvn.c` (`present_itv`, `nvn_game_fps`) then presents every vsync whatever interval the game asks for, so no profile `present_interval` is needed and 30 keeps the game's own interval. The profile's `fps_target` (30 or 60; `DM_FPS_TARGET` overrides) picks it.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md) (1.0.8, `main` build `c6901ce5426c704a5f51cfdab4a6c4ff`; found from the function names in `main`: `NuVideoSetSwapMode`, `nttUniverse::GetTargetFrameRate`).
+- **Check:** at 60 the log has `main: NuCore video swap mode 3 → 1 (60 fps)` and `NuCore retrace rate 30 → 60 fps`; frame time p50 16.67 ms, p95 16.9 ms in the first level on an M-series Mac. The intro film's scenes come at the same times as at 30 fps, and the stick moves Leia as far in 2 s at 60 as at 30 (screenshots at the same moments), so the engine's time steps follow.
+
 ## Present interval and display rate
 
 ### Present thread rescues a silent display link

@@ -45,3 +45,7 @@ tex_flush_upload	on
 tex_dirty_upload	on
 tex_init_upload	on
 tex_copy_mirror	on
+
+# ---- Frame rate ----
+# TT Games' video swap mode (hle_fpslock.c, docs/reference/frame-rate.md): 60 holds on an M-series Mac (frame time p50 16.67 ms, p95 16.9 ms in the first level); 30 is the game's own
+fps_target	60
