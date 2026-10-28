@@ -36,6 +36,14 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Fix:** a thread-local flag (`t_in_open`) hands the inner call straight to the SDK with the host's CPU / manual copy of the parameter, and only the outer call starts the thread (`hle_audren.c`).
 - **Found on:** [ROMANCE OF THE THREE KINGDOMS 8 REMAKE](../../dm/games/0100C2A01A730000/README.md) (SDK 17.5.3).
 
+### More than one renderer open (`ar_t`)
+
+- **Symptom:** `[RED] audren: a second renderer (the host drives only one)` after a game opens a second `AudioRenderer` of its own (LEGO Star Wars: The Skywalker Saga, 48 kHz with 32 voices, about 50 s into the boot, with the first movie clips); the second one was never rendered and its work went to the first one's output.
+- **Cause:** the renderer's state was global (handle, render thread, output buffer, catch-up queue, update counters, resampler phase), so a second open had to be refused, and the `ExecuteAudioRendererRendering` / `Update` hooks, which see only the `AudioRenderSystem`, wrote every renderer's frames into one buffer.
+- **Fix:** one `ar_t` per renderer (up to `AR_MAX` 4): own render thread and output (`DM_AUDREN_DUMP` writes a later renderer's mix to `<file>.<n>`), catch-up queue, counters and 3:2 resampler state. The hooks find the renderer by its system: the render thread by `t_ar`, a game thread by the system a render has claimed, else by the nearest handle below it (the system is a member of the object the handle points to: handle + 0x70 in SDK 16), else the only unclaimed one. Capture and the resampler's filter stay under one lock for all renderers.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md). That renderer's command lists hold no voices in the boot, the movie clips, the intro film and the first level (9 commands: volume, depop, clear, sink), so nothing audible came of driving it; Mario Kart 8's single renderer renders as before.
+- **Check:** the log has `render thread 1 started`, and `renderer 1, N commands, by command ID: …` shows whether it ever holds voices (IDs other than 7, 14, 19, 24 in SDK 16).
+
 ### The renderer's update lock (`update_lock`)
 
 - **Symptom:** none of its own; command generation races the game's `Update` on SDKs whose lock is not at SDK 16's offset.
@@ -159,7 +167,7 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 
 ### Checking audio without listening
 
-`DM_AUDIO_DUMP=file` writes the PCM the host plays through `AudioOut` (16-bit, 48 kHz, stereo); `DM_AUDREN_DUMP=file` writes what the audio renderer (`hle_audren.c`) hands to the output (also 16-bit, 48 kHz, stereo), for games whose sound is the renderer's mix (LEGO Star Wars: The Skywalker Saga: from the menus on, RMS 500–3000, peaks below 17000, no clipping, left and right alike). RMS per second, clipping share, spectral flatness (music ≈ 0.1–0.5, white noise ≈ 0.85) and the strongest FFT peaks (they should land on musical notes) tell real music from noise or silence.
+`DM_AUDIO_DUMP=file` writes the PCM the host plays through `AudioOut` (16-bit, 48 kHz, stereo); `DM_AUDREN_DUMP=file` writes what the audio renderer (`hle_audren.c`) hands to the output (also 16-bit, 48 kHz, stereo; a second renderer's goes to `file.1`), for games whose sound is the renderer's mix (LEGO Star Wars: The Skywalker Saga: from the menus on, RMS 500–3000, peaks below 17000, no clipping, left and right alike). RMS per second, clipping share, spectral flatness (music ≈ 0.1–0.5, white noise ≈ 0.85) and the strongest FFT peaks (they should land on musical notes) tell real music from noise or silence.
 
 ### AudioOut volume kept per output
 
