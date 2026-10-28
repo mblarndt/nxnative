@@ -164,6 +164,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Fix:** the reader (`raw_shaders`) takes them. Both neighbours can pass the header and length checks, so it takes only a code area the code builds the address of, the nearest one to the control section's.
 - **Found on:** [Advance Wars 1+2: Re-Boot Camp](../../dm/games/0100300012F2A000/README.md) (Unity 2020.2 with Bink 2's Unity plugin). Of 25 `main`s on hand no other has such control sections.
 
+### Programs the host captured, kept in the profile (`shader_capture`)
+
+- **Symptom:** `[RED] shader … is not in the shader map` and `program has no vertex shader` for programs that no file of the game holds in a form the split reads; the draw is left out (LEGO Star Wars: The Skywalker Saga: the picture of the Lucasfilm Games logo film stayed black).
+- **Cause:** the movie plugin (`subsdk1`) builds its YUV-to-RGB blit at run time, a vertex shader that draws a quad (`391a5ee944e7a4ef`) and a pixel shader that samples three 8-bit planes (`d583feebff837ce0`: 1920x1080 and two 960x540); neither is in `main`, the DAT archives or a GLSLC output.
+- **Fix:** `DM_NVN_SHDUMP=<dir>` saves the program (`<key>.ctl` and `<key>.code`); the files go into the profile's `shader_capture` folder, which `shader_split.py` reads without any variable (`DM_SHADER_CAPTURE=<dir>` still names another folder) and which `build_ipa_from_nsp.py` counts in the split's inputs. The tables then hold the program and the shader step translates it (a change of the tables costs the shader step its whole cache: 54 minutes for 98,025 shaders).
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md): 32 programs in all, the last two seen as the logo film starts (frame 1761, pass with three planes sampled into a 1920x1080 target).
+- **Check:** a run no longer prints the two lines, the Lucasfilm Games logo shows after the TT logo, and a pass dump of that moment (`DM_CTL passdump 2`) lists both keys.
+
 ### MGFX effects in MonoGame XNB files
 
 - **How it is stored:** the 13 XNB files in `Content/Effects` (XNB platform `S`, uncompressed, read by `EffectReader`) each hold one MGFX effect, and `main` holds SpriteBatch's built-in one; no other file and no GLSLC output. A compressed XNB (MonoGame's LZX flag 0x80 or LZ4 flag 0x40, as in Stardew Valley) is decompressed first (`xnb_decompress`).

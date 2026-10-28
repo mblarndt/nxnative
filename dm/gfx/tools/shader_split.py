@@ -1866,9 +1866,10 @@ def main():
         if not names and img.count(b'#version ') and 'glslcCompile' in main_imports(img) and glslc_module(os.path.dirname(os.path.abspath(mainnso))):
             print(f'[RED] main holds GLSL sources and imports glslcCompile, but there are no captured GLSLC outputs in {cap}: the shaders the game compiles at run time will have no translation', flush=True)
         for nm in names: found += glslc_shaders(open(os.path.join(cap, nm), 'rb').read(), f'/glslc_capture/{nm}')
-        # Programs the Mac host dumped while the game ran (DM_NVN_SHDUMP=<dir>: <key>.ctl + <key>.code): DM_SHADER_CAPTURE=<dir> adds them (bring-up of a game whose shaders are in an archive the split cannot read yet)
-        for nm in sorted(f for f in os.listdir(os.environ.get('DM_SHADER_CAPTURE', os.devnull)) if f.endswith('.ctl')) if os.environ.get('DM_SHADER_CAPTURE') else []:
-            cd = os.environ['DM_SHADER_CAPTURE']; ctl, code = open(os.path.join(cd, nm), 'rb').read(), open(os.path.join(cd, nm[:-4] + '.code'), 'rb').read()
+        # Programs the Mac host dumped while the game ran (DM_NVN_SHDUMP=<dir>: <key>.ctl + <key>.code): DM_SHADER_CAPTURE=<dir>, or the profile's shader_capture folder, adds them (a game whose shaders are in an archive the split cannot read yet, or that builds a few at run time)
+        cd = os.environ.get('DM_SHADER_CAPTURE') or str(GAME.dir / 'shader_capture')   # the profile's own shader_capture folder when the variable is not set (LEGO Star Wars: The Skywalker Saga, build_ipa_from_nsp.py split_shaders)
+        for nm in sorted(f for f in os.listdir(cd) if f.endswith('.ctl')) if os.path.isdir(cd) else []:
+            ctl, code = open(os.path.join(cd, nm), 'rb').read(), open(os.path.join(cd, nm[:-4] + '.code'), 'rb').read()
             st = glslc_stage(ctl, code)
             if st and not check('capture', st, ctl, code): found.append((f'/shader_capture/{nm[:-4]}', st, ctl, code))
         # Unreal Engine shader code archives decoded on the Mac (uepak.py): <version dir>/ue_shaders, or DM_UE_SHADERS; needed when the RomFS has Unreal paks
