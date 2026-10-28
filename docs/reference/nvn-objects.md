@@ -25,6 +25,14 @@ The game allocates NVN objects with the sizes of *its* SDK's headers, which shra
 - **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md) (SDK 12.3.6).
 - **Check:** `DM_NVN_PASSDUMP`'s `B … cb reg` lines: distinct addresses and sizes of the right order, `f=` values that are plausible (screen size, 1/width).
 
+### A program object the game freed or left half set (`keys_hash`, `prog_get`)
+
+- **Symptom:** crash in `keys_hash` or `prog_key` (`addr=0x705`, an ASCII-looking address, `0x3f8000003f800704`), in `objc_retain` called from `bind_stages` (`addr=0x1`), or `SIGBUS` in `prog_key`, minutes into a LEGO Star Wars: The Skywalker Saga run; with the dump switch (`DM_NVN_SHDUMP`) the same in `prog_get`. Many `[RED] shader 0000000000000000 is not in the shader map` lines.
+- **Cause:** the game passes `nvnProgramSetShaders` stage entries it left unset (a control pointer of 1, floats, text), and finalizes or re-uses `NVNprogram` objects while binds recorded earlier still name them. The host computed the key from the entry's control and code pointers at the first use, and read the object's serial from memory that was the game's again.
+- **Fix:** `ProgramSetShaders` keeps the control section's own bytes for a stage whose key is not known yet and sets an unmapped control pointer to NULL (`ctl_readable`, `mem_ok`: the first and last byte must lie in a region of the process; a read through the kernel would fail for pages the dirty-page tracker keeps unreadable); `keys_hash` returns no key for such an entry; `prog_get` ignores an object whose magic is gone (finalized).
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md).
+- **Check:** a 15-minute run to the new game's first level without a crash; no flood of `shader 0000000000000000` lines.
+
 ### A texture's content only went in through a GPU copy, and the game moves its textures about in the pool (`tex_copy_mirror`)
 
 - **Symptom:** menus and dialogs show their frames and fills but no text, no button icons and no pictures; the glyph atlas (`texraw`, `memdump` of the storage `texlist` prints) is all zeros, or holds the right picture shifted by a few KB (`0x800`, `0x5800`) so that letters come out cut in bands; the log has no `[RED]` line. `DM_NVN_TEXINFO`-style logs of `nvnTextureInitialize` show the same `NVNtexture` object finalized and initialized again every second or so at a slightly higher pool address, with the same size.

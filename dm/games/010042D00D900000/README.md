@@ -29,9 +29,10 @@ No `patches.py`, no `sdk_patches.py` cut, no `pad_layout`.
 
 ## Open
 
+- **The first level shows no picture.** The game starts (Episode IV crawl, Leia in "Boarding Party", HUD, pause menu with the 3D figures), the HDR scene renders correctly into its target and the half-size copy is right, but the final picture is black. The color-grading LUT (a compute pass writing a 3D texture from two LUT textures loaded by copies) is the first suspect: `tex_copy_mirror` mirrors 3D textures now (not tested in a run that reached the level).
+- **Runs differ:** some stop after the intro film starts (black, no draws, the render thread sleeps in a poll loop while the main thread waits for its mutex); some reach the level. A cause is not known; the thread dump (`DM_CTL threads`) shows no host thread stuck.
 - **Two shaders are not in the map** (`391a5ee944e7a4ef`, `d583feebff837ce0`; `DM_NVN_SHDUMP` saved them): drawn in the 3D scenes, left out for now. A change of the tables costs the one-hour shader build again.
-- **The intro film's scene is blown out** (white, magenta and yellow areas) at times, as if the exposure were far off; the histogram compute pass runs now, its result is not checked.
 - **A second audio renderer** is opened after the intro (`[RED] audren: a second renderer (the host drives only one)`).
 - **Timing:** the screens come at different times from run to run; drive it with `DM_CTL` (A / B lines) while watching `shot`s. The first run needs: A (language), A (seizure warning), B (accessibility options: No), then A through the title screen's notices to the new-game menu.
-- From the new game on (first level, sound, controller): not checked.
+- Sound in the level, the controller: not checked.
 - The 363 files of mode 6 (`ZIPX`, scrambled; 73 MB in all) are not read by the shader split; it is not known whether one holds shaders.

@@ -588,9 +588,12 @@ static void pk_drop(const void *p) {
     pthread_mutex_unlock(&g_pk_mu);
 }
 // mapped = 1: computed only when the code area is in a registered memory pool (at SetShaders: Mario sets some programs with an unmapped address first and fills it in before the first draw)
-static int mem_ok(uint64_t a, uint64_t n) {   // the first and last bytes read through the kernel: a stage entry the game left unset points anywhere (LEGO Star Wars: The Skywalker Saga: a control pointer of 1, ASCII for a code pointer)
-    uint8_t b[4]; vm_size_t got = 0;
-    return a && n && !vm_read_overwrite(mach_task_self(), a, 4, (vm_address_t)b, &got) && got == 4 && !vm_read_overwrite(mach_task_self(), a + n - 4, 4, (vm_address_t)b, &got) && got == 4;
+static int mapped_at(uint64_t a) {   // the address lies in a region of the process, whatever its protection (the dirty-page tracker keeps pages unreadable and resolves the fault: a read through the kernel would fail for those)
+    vm_address_t base = (vm_address_t)a; vm_size_t size = 0; vm_region_basic_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj;
+    return a >= 0x1000 && vm_region_64(mach_task_self(), &base, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &cnt, &obj) == KERN_SUCCESS && base <= a && a - base < size;
+}
+static int mem_ok(uint64_t a, uint64_t n) {   // first and last byte mapped: a stage entry the game left unset points anywhere (LEGO Star Wars: The Skywalker Saga: a control pointer of 1, ASCII for a code pointer)
+    return n && mapped_at(a) && mapped_at(a + n - 1);
 }
 static int ctl_readable(const void *c) { return mem_ok((uint64_t)(uintptr_t)c, 0x708); }   // up to the code size at +0x704: a section can be shorter than 0x880 bytes and end a mapping
 static uint32_t ctl_len(const void *c) { uint32_t own; memcpy(&own, (const uint8_t *)c + 0x20, 4); return own >= 0x760 && own < 0x880 ? own : 0x880; }   // what keys_hash reads of it
@@ -629,7 +632,8 @@ NVN(nvnProgramSetShaders, NVNboolean, NVNprogram *p, int n, const NVNshaderData 
         if (keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
         // DM_NVN_SHDUMP (debugging): keep a copy of the control section so the replay layer can save shaders missing from the map (never freed). So does a stage whose key is not known yet (its code area was not in a pool):
         // the key is made at the first use (prog_key), when the game's control section may be gone (LEGO Star Wars: The Skywalker Saga builds some on its stack: a crash in keys_hash, and a key of other bytes)
-        if ((dump || !(k->ok >> i & 1)) && ctl_readable(sd[i].control) && mem_ok((uint64_t)(uintptr_t)sd[i].control, ctl_len(sd[i].control))) { void *c = calloc(1, 0x880); memcpy(c, sd[i].control, ctl_len(sd[i].control)); o->sd[i].control = c; }
+        if (!ctl_readable(sd[i].control)) o->sd[i].control = NULL;   // an entry the game left unset: no control section, no key
+        else if ((dump || !(k->ok >> i & 1)) && mem_ok((uint64_t)(uintptr_t)sd[i].control, ctl_len(sd[i].control))) { void *c = calloc(1, 0x880); memcpy(c, sd[i].control, ctl_len(sd[i].control)); o->sd[i].control = c; }
     }
     OLOG("ProgramSetShaders %p n=%d data0=%#llx", (void *)p, n, n ? (unsigned long long)sd[0].data : 0ull);
     return 1;
