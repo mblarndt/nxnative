@@ -8,7 +8,7 @@ x0=… x28=…
 [dm] bt: main+0x373dd8 main+0x2ea2ac …          frame-pointer backtrace
 [dm] fp=…  0x100 bytes below sp: …                 the 32 words below sp (the frame that was just popped)
 [dm] stack scan sp=…: [-72]main+0x57a14 [+24]main+0x57618 …   every word near sp that resolves to a module or host symbol
-[dm] thread 0x1001 'main thread' …                  all guest threads, what they wait on, their backtraces
+[dm] thread 0x1001 'main thread' …                  all guest threads, what they wait on, their backtraces (a thread asleep in a poll loop gets a "guest backtrace at the last svc" from the frame pointer it issued its last SVC with)
 ```
 
 - `pc` and `lr` are module-relative (`main+…`, `sdk+…`) or host symbols. Module offsets are the same as in the decompressed NSO and the ELF (Ghidra adds 0x100000).

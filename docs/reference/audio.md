@@ -159,7 +159,7 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 
 ### Checking audio without listening
 
-`DM_AUDIO_DUMP=file` writes the PCM the host plays (16-bit, 48 kHz, stereo). RMS per second, clipping share, spectral flatness (music ≈ 0.1–0.5, white noise ≈ 0.85) and the strongest FFT peaks (they should land on musical notes) tell real music from noise or silence.
+`DM_AUDIO_DUMP=file` writes the PCM the host plays through `AudioOut` (16-bit, 48 kHz, stereo); `DM_AUDREN_DUMP=file` writes what the audio renderer (`hle_audren.c`) hands to the output (also 16-bit, 48 kHz, stereo), for games whose sound is the renderer's mix (LEGO Star Wars: The Skywalker Saga: from the menus on, RMS 500–3000, peaks below 17000, no clipping, left and right alike). RMS per second, clipping share, spectral flatness (music ≈ 0.1–0.5, white noise ≈ 0.85) and the strongest FFT peaks (they should land on musical notes) tell real music from noise or silence.
 
 ### AudioOut volume kept per output
 

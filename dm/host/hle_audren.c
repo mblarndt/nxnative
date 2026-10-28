@@ -117,6 +117,9 @@ static void render_main(void *arg) {
         gbuf *b = free_list[--nfree];
         if (got) memcpy(b->ptr, src, (size_t)n * 4); else memset(b->ptr, 0, (size_t)n * 4);
         b->size = (uint64_t)n * 4;
+        // Diagnostic switch DM_AUDREN_DUMP=<file>: every block the renderer hands to the output is written as is (stereo 16-bit, 48 kHz), to judge the mix without a sound card (level, clipping, spectrum)
+        { static FILE *df; static int on = -1; if (on < 0) { const char *e = getenv("DM_AUDREN_DUMP"); on = e != NULL; if (on && !(df = fopen(e, "wb"))) LOG("[RED] DM_AUDREN_DUMP cannot open %s", e); }
+          if (df) fwrite(b->ptr, 1, (size_t)b->size, df); }
         if (!dm_pcmout_append(out, b)) free_list[nfree++] = b;
     }
     dm_pcmout_close(out);   // the output would otherwise keep its sound card callback or silent sink running and hold one of the AudioOut slots after the renderer closes

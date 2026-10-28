@@ -64,7 +64,7 @@ typedef struct thr {
     uint64_t wseq;             // Sequence number of wait registration: at equal priority first come, first woken (same order as the Horizon kernel's KThread wait tree)
     struct thr *next;          // Wait chain
     struct thr *all;           // All-threads chain (for the state dump)
-    int last_svc; uint64_t last_lr;
+    int last_svc; uint64_t last_lr, last_fp;
     int closed;                // Handle closed: the object is freed only when this holds together with exited (Horizon: the thread object goes away with the last reference)
     uint64_t nsvc;             // SVC count (for the state dump)
     uint64_t nyield, nyield_seen, nbackoff, nbackoff_seen;   // Yields (SleepThread 0/-1/-2) and those the back-off turned into short sleeps, with both counts at the last power report (dm_yield_top)
@@ -591,6 +591,15 @@ static void thr_bt(thr_t *t) {
             fp = fr[0]; lr = fr[1];
         }
         fprintf(stderr, "%s\n", line);
+        // A thread asleep in a poll loop is inside the host's SVC handler, whose frames the walk above cannot read: its guest chain starts at the link register and frame pointer it issued the last SVC with
+        if (!nf && t->last_fp) { char gl[1024]; int gp = snprintf(gl, sizeof gl, "[dm]   %#x guest backtrace at the last svc:", t->handle), gn = 0; uint64_t gfp = t->last_fp, glr = t->last_lr;
+            for (int k = 0; k < 64 && gfp && gn < 24 && gp < (int)sizeof gl - 40; k++) {
+                module_t *m = module_of((void *)glr);
+                if (m) { gp += snprintf(gl + gp, sizeof gl - gp, " %s+%#llx", m->name, glr - (uint64_t)m->base); gn++; }
+                uint64_t fr[2]; vm_size_t g2 = 0;
+                if (vm_read_overwrite(mach_task_self(), gfp, 16, (vm_address_t)fr, &g2) || g2 != 16 || fr[0] <= gfp) break;
+                gfp = fr[0]; glr = fr[1]; }
+            fprintf(stderr, "%s\n", gl); }
     }
     thread_resume(t->mport);
 }
@@ -796,7 +805,7 @@ int svc_thread(int num, uint64_t *regs) {
     return r;
 }
 static int svc_thread_impl(int num, uint64_t *regs) {
-    { thr_t *me = pthread_getspecific(g_keythr); if (me) { me->last_svc = num; me->last_lr = regs[30]; me->nsvc++; } }
+    { thr_t *me = pthread_getspecific(g_keythr); if (me) { me->last_svc = num; me->last_lr = regs[30]; me->last_fp = regs[29]; me->nsvc++; } }
     if (g_flag.thr && num != 0x0B) { thr_t *me = pthread_getspecific(g_keythr); LOG("[%#x] svc %#x x0=%#llx x1=%#llx x2=%#llx x3=%#llx", me ? me->handle : 0, num, regs[0], regs[1], regs[2], regs[3]); }
     switch (num) {
     case 0x08: {  // CreateThread(→w1 handle; x1 entry, x2 argument, x3 stack top, w4 priority, w5 core)
