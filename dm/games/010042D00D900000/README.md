@@ -2,7 +2,7 @@
 
 Update 1.0.8 (`v524288`) over the base game (no other update exists for this title ID), SDK 12.3.6 (NVN API 53), TT Games' NuCore engine on NVN. Modules `main` (the game, 98.5 MB of text, 16 MB of bss), `sdk`, `subsdk0` (GLSLC, not loaded: `main` imports nothing from it) and `subsdk1` (NintendoSDK_movie). The RomFS is 7 TT Games archives (`GAME.DAT`, `GAME0.DAT` … `GAME4.DAT`, `PATCH.DAT`: 15.6 GB, no `.HDR`) and `BootScreen.png`; the DLC (11 add-on contents) are small `.DAT` files of their own. 30 fps by the game's own choice (present interval 2).
 
-Work in progress: the Mac host runs it from the language menu through the intro film to the title screen and the new-game menu, with the menus' text, icons and the 3D scenes drawn; what is left is listed under Open.
+Work in progress: the Mac host runs it from the language menu through the intro film, the title screen and the new-game menu into the first level (Tantive IV, Leia and the rebel troopers in colour), with the menus' text, icons and the 3D scenes drawn; what is left is listed under Open.
 
 ## What it needs
 
@@ -26,10 +26,10 @@ No `patches.py`, no `sdk_patches.py` cut, no `pad_layout`.
 - **No text, no icons, empty or shifted textures:** a texture only the GPU copy filled came out of every move as zeros ([`tex_copy_mirror`](../../../docs/reference/nvn-objects.md#a-textures-content-only-went-in-through-a-gpu-copy-and-the-game-moves-its-textures-about-in-the-pool-tex_copy_mirror)), a texture made over data the game had read into the pool was never uploaded (`tex_init_upload`).
 - **Abort in the first 3D scene:** the luminance histogram's image atomics, one image declared as integers, atomically and as floats ([shaders](../../../docs/reference/shaders.md#an-image-the-shader-reads-as-integers-atomically-and-as-floats-imga-with-two-img-views)).
 - **Crash in `keys_hash`:** a stage entry the game left unset (control pointer 1) was read as a control section.
+- **Black 3D picture (fixed):** the bloom target (RG11B10F) was all NaN, because a pass that loads a float target and overwrites it with ONE / ZERO blending kept the NaN of its old content; the tonemap pass turned it into black (intro film after its first seconds, the main menu's background, every level). The pipeline no longer blends ONE / ZERO ([rendering](../../../docs/reference/rendering.md#one--zero-blending-is-not-blended)).
 
 ## Open
 
-- **The first level shows no picture.** The game starts (Episode IV crawl, Leia in "Boarding Party", HUD, pause menu with the 3D figures), the HDR scene renders correctly into its target and the half-size copy is right, but the final picture is black. The color-grading LUT (a compute pass writing a 3D texture from two LUT textures loaded by copies) is the first suspect: `tex_copy_mirror` mirrors 3D textures now (not tested in a run that reached the level).
 - **Runs differ:** some stop after the intro film starts (black, no draws, the render thread sleeps in a poll loop while the main thread waits for its mutex); some reach the level. A cause is not known; the thread dump (`DM_CTL threads`) shows no host thread stuck.
 - **Two shaders are not in the map** (`391a5ee944e7a4ef`, `d583feebff837ce0`; `DM_NVN_SHDUMP` saved them): drawn in the 3D scenes, left out for now. A change of the tables costs the one-hour shader build again.
 - **A second audio renderer** is opened after the intro (`[RED] audren: a second renderer (the host drives only one)`).

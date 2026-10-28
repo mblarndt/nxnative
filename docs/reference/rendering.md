@@ -324,6 +324,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Super Mario 3D World + Bowser's Fury](../../dm/games/010028600EBDA000/README.md): volume draws after the G-buffer (`50d813761ca3f1f9` and others) write only outputs 0 and 2, with blending and all channels enabled on targets 1 and 3.
 - **Check:** all five games' regressions were unchanged by it.
 
+### ONE / ZERO blending is not blended
+
+- **Symptom:** a float colour target that a pass loads and draws over entirely stays NaN for good; a later pass that adds it turns the whole picture black (LEGO Star Wars: The Skywalker Saga: the intro film after its first seconds, the main menu's background and every level).
+- **Cause:** the game leaves blending enabled with ONE / ZERO and ADD (an overwrite) from earlier draws. Metal evaluates `src + dst * 0`, and a NaN in the loaded old content (the new texture's first content, a stale frame) gives NaN again, which then reloads every frame. Maxwell's blend unit gives `src` there.
+- **Fix:** the pipeline (`nvn_mtl.m`, colour attachment setup) leaves blending off when the state is ONE / ZERO with ADD for colour and alpha.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga](../../dm/games/010042D00D900000/README.md): the bloom target (RG11B10F, 400x226) read all NaN (`0xfc3f07e0`); the tonemap pass `cd66359450b37b5c` adds it to the scene and turned NaN coordinates of its colour lookup into black.
+- **Check:** the level (Tantive IV corridor) renders in colour, the intro film plays to its end and the main menu shows its background.
+
 ### Advanced blend modes as Porter-Duff factors
 
 - **Symptom:** `nvnBlendStateSetAdvancedMode 8` (SRC_OVER) logged and blended with the state's own functions.

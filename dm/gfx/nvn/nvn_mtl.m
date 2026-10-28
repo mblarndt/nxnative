@@ -4676,8 +4676,14 @@ static MTLRenderPipelineDescriptor *pso_desc(const pso_key *k, NvShader *vs, NvS
         if (unwritten) m = 0;
         c.writeMask = (m & 1 ? MTLColorWriteMaskRed : 0) | (m & 2 ? MTLColorWriteMaskGreen : 0) | (m & 4 ? MTLColorWriteMaskBlue : 0) | (m & 8 ? MTLColorWriteMaskAlpha : 0);
         // Integer targets: no blending. Maxwell ignores the blend enable on them; Metal refuses the pipeline (an assertion even without the API validation layer): Luigi's Mansion 3's integer G-buffer (PR #105)
-        if (l != 0xff && k->blend_en >> l & 1 && !unwritten && !pf_int_kind(c.pixelFormat)) {
-            c.blendingEnabled = YES; blend_st bl = adv_blend(k->blend[l]);
+        // ONE / ZERO with ADD is a plain overwrite, so it is not blended: Metal computes src + dst * 0, and a NaN in the old content of a float target the pass loads (the pass draws every texel, nothing clears it)
+        // stays NaN for good (blend enable is left on by the game from earlier draws). LEGO Star Wars: The Skywalker Saga's bloom target (RG11B10F, loaded by every frame's pass) came out all NaN, and
+        // the tonemap pass that adds it turned the whole picture black. Maxwell's blend unit gives src there (0 * x = 0)
+        blend_st bl0 = l == 0xff ? (blend_st){0} : adv_blend(k->blend[l]);
+        int overwrite = bl0.src_rgb == NVN_BLEND_FUNC_ONE && bl0.dst_rgb == NVN_BLEND_FUNC_ZERO && bl0.src_a == NVN_BLEND_FUNC_ONE && bl0.dst_a == NVN_BLEND_FUNC_ZERO &&
+                        bl0.eq_rgb == NVN_BLEND_EQUATION_ADD && bl0.eq_a == NVN_BLEND_EQUATION_ADD;
+        if (l != 0xff && k->blend_en >> l & 1 && !unwritten && !pf_int_kind(c.pixelFormat) && !overwrite) {
+            c.blendingEnabled = YES; blend_st bl = bl0;
             c.sourceRGBBlendFactor = bfac(bl.src_rgb); c.destinationRGBBlendFactor = bfac(bl.dst_rgb);
             c.sourceAlphaBlendFactor = bfac(bl.src_a); c.destinationAlphaBlendFactor = bfac(bl.dst_a);
             c.rgbBlendOperation = bop(bl.eq_rgb); c.alphaBlendOperation = bop(bl.eq_a);
