@@ -9,29 +9,29 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 | [ASTRAL CHAIN](#astral-chain) | 0 | 0 | 112 | 0 | 0 | yes |
 | [Batman: Arkham Knight](#batman-arkham-knight) | 8 | 0 | 0 | 0 | 1 | yes |
 | [DARK SOULS: REMASTERED](#dark-souls-remastered) | 2 | 0 | 0 | 0 | 0 | yes |
-| [DRAGON QUEST VII Reimagined](#dragon-quest-vii-reimagined) | 1 | 1 | 0 | 0 | 7 | yes |
-| [DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition](#dragon-quest-xi-s-echoes-of-an-elusive-age--definitive-edition) | 0 | 0 | 0 | 0 | 6 |  |
+| [DRAGON QUEST VII Reimagined](#dragon-quest-vii-reimagined) | 1 | 1 | 0 | 0 | 3 | yes |
+| [DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition](#dragon-quest-xi-s-echoes-of-an-elusive-age--definitive-edition) | 0 | 0 | 0 | 0 | 2 |  |
 | [FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition](#final-fantasy-crystal-chronicles-remastered-edition) | 8 | 0 | 0 | 0 | 0 | yes |
-| [FINAL FANTASY RESONANCE](#final-fantasy-resonance) | 1 | 0 | 0 | 0 | 7 | yes |
-| [FINAL FANTASY RESONANCE (Asian release)](#final-fantasy-resonance-asian-release) | 1 | 0 | 0 | 0 | 4 | yes |
+| [FINAL FANTASY RESONANCE](#final-fantasy-resonance) | 1 | 0 | 0 | 0 | 3 | yes |
+| [FINAL FANTASY RESONANCE (Asian release)](#final-fantasy-resonance-asian-release) | 1 | 0 | 0 | 0 | 2 | yes |
 | [FINAL FANTASY TACTICS - The Ivalice Chronicles](#final-fantasy-tactics---the-ivalice-chronicles) | 2 | 0 | 0 | 0 | 0 | yes |
 | [Fire Emblem Engage](#fire-emblem-engage) | 1 | 0 | 0 | 0 | 0 | yes |
 | [Fire Emblem: Three Houses](#fire-emblem-three-houses) | 12 | 0 | 0 | 0 | 0 | yes |
 | [Hyrule Warriors: Age of Calamity](#hyrule-warriors-age-of-calamity) | 0 | 0 | 3 | 0 | 0 | yes |
-| [LEGO® Star Wars™: The Skywalker Saga](#lego-star-wars-the-skywalker-saga) | 0 | 0 | 0 | 0 | 6 |  |
-| [Luigi's Mansion 3](#luigis-mansion-3) | 0 | 0 | 0 | 0 | 3 |  |
+| [LEGO® Star Wars™: The Skywalker Saga](#lego-star-wars-the-skywalker-saga) | 0 | 0 | 0 | 0 | 2 |  |
+| [Luigi's Mansion 3](#luigis-mansion-3) | 0 | 0 | 0 | 0 | 1 |  |
 | [Mario + Rabbids Kingdom Battle](#mario--rabbids-kingdom-battle) | 6 | 0 | 0 | 0 | 0 | yes |
 | [Mario + Rabbids® Sparks of Hope](#mario--rabbids-sparks-of-hope) | 7 | 0 | 0 | 0 | 0 | yes |
-| [Monster Hunter Rise](#monster-hunter-rise) | 0 | 0 | 0 | 0 | 3 |  |
-| [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](#nierautomata-the-end-of-yorha-edition-010056b015fe8000) | 8 | 0 | 0 | 0 | 3 | yes |
-| [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](#nierautomata-the-end-of-yorha-edition-0100b8e016f76000) | 8 | 0 | 0 | 0 | 3 | yes |
-| [OCTOPATH TRAVELER 0](#octopath-traveler-0) | 1 | 0 | 0 | 0 | 7 | yes |
-| [OCTOPATH TRAVELER II](#octopath-traveler-ii) | 1 | 1 | 0 | 0 | 7 | yes |
+| [Monster Hunter Rise](#monster-hunter-rise) | 0 | 0 | 0 | 0 | 1 |  |
+| [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](#nierautomata-the-end-of-yorha-edition-010056b015fe8000) | 8 | 0 | 0 | 0 | 1 | yes |
+| [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](#nierautomata-the-end-of-yorha-edition-0100b8e016f76000) | 8 | 0 | 0 | 0 | 1 | yes |
+| [OCTOPATH TRAVELER 0](#octopath-traveler-0) | 1 | 0 | 0 | 0 | 3 | yes |
+| [OCTOPATH TRAVELER II](#octopath-traveler-ii) | 1 | 1 | 0 | 0 | 3 | yes |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | yes |
 | [Pikmin 4](#pikmin-4) | 3 | 1 | 0 | 0 | 1 | yes |
-| [Pokémon Brilliant Diamond](#pokémon-brilliant-diamond) | 0 | 0 | 0 | 0 | 3 |  |
+| [Pokémon Brilliant Diamond](#pokémon-brilliant-diamond) | 0 | 0 | 0 | 0 | 1 |  |
 | [Pokémon Scarlet](#pokémon-scarlet) | 1 | 0 | 0 | 0 | 0 | yes |
-| [SHIN MEGAMI TENSEI V: Vengeance](#shin-megami-tensei-v-vengeance) | 1 | 1 | 0 | 0 | 7 | yes |
+| [SHIN MEGAMI TENSEI V: Vengeance](#shin-megami-tensei-v-vengeance) | 1 | 1 | 0 | 0 | 3 | yes |
 | [Subnautica](#subnautica) | 1 | 0 | 0 | 0 | 0 | yes |
 | [Subnautica: Below Zero](#subnautica-below-zero) | 1 | 0 | 0 | 0 | 0 | yes |
 | [Super Smash Bros. Ultimate](#super-smash-bros-ultimate) | 11 | 0 | 0 | 1 | 0 | yes |
@@ -206,10 +206,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
   - gate 21 at `+0x32758e4`: GCreateMalloc: the allocator object is in x19, before it is used: the host puts its vtable in; orig mov x0, x19
   - host [hle_fpslock.c:42](../../dm/host/hle_fpslock.c#L42): engine frame limit set to fps_target: Unreal t.MaxFPS
   - host [hle_fpslock.c:43](../../dm/host/hle_fpslock.c#L43): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:42](../../dm/host/hle_fpslock.c#L42): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:43](../../dm/host/hle_fpslock.c#L43): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:42](../../dm/host/hle_fpslock.c#L42): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:43](../../dm/host/hle_fpslock.c#L43): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:42](../../dm/host/hle_uemalloc.c#L42): Unreal's allocator on a host malloc zone
 
 ### DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition
@@ -217,10 +213,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 [DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition](../../dm/games/01006C300E9F0000/README.md), `01006C300E9F0000`.
 
 - **1.0.4 `main`** `1719aabf…`
-  - host [hle_fpslock.c:37](../../dm/host/hle_fpslock.c#L37): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:38](../../dm/host/hle_fpslock.c#L38): engine frame limit set to fps_target: Unreal nvn.SyncInterval
-  - host [hle_fpslock.c:37](../../dm/host/hle_fpslock.c#L37): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:38](../../dm/host/hle_fpslock.c#L38): engine frame limit set to fps_target: Unreal nvn.SyncInterval
   - host [hle_fpslock.c:37](../../dm/host/hle_fpslock.c#L37): engine frame limit set to fps_target: Unreal t.MaxFPS
   - host [hle_fpslock.c:38](../../dm/host/hle_fpslock.c#L38): engine frame limit set to fps_target: Unreal nvn.SyncInterval
 
@@ -250,10 +242,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
   - cut `+0x137f0`: nninitStartup: bl 0xae770 (FMallocBinned3 constructor, 38 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)
   - host [hle_fpslock.c:46](../../dm/host/hle_fpslock.c#L46): engine frame limit set to fps_target: Unreal t.MaxFPS
   - host [hle_fpslock.c:47](../../dm/host/hle_fpslock.c#L47): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:46](../../dm/host/hle_fpslock.c#L46): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:47](../../dm/host/hle_fpslock.c#L47): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:46](../../dm/host/hle_fpslock.c#L46): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:47](../../dm/host/hle_fpslock.c#L47): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:53](../../dm/host/hle_uemalloc.c#L53): Unreal's allocator on a host malloc zone
 
 ### FINAL FANTASY RESONANCE (Asian release)
@@ -264,8 +252,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 
 - **1.0.1 `main`** `b7f965b9…` ([patches.py:7](../../dm/games/0100B8A026F14000/patches.py#L7))
   - cut `+0x137f0`: nninitStartup: bl 0xae770 (FMallocBinned3 constructor, 38 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)
-  - host [hle_fpslock.c:49](../../dm/host/hle_fpslock.c#L49): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:49](../../dm/host/hle_fpslock.c#L49): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_fpslock.c:49](../../dm/host/hle_fpslock.c#L49): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:55](../../dm/host/hle_uemalloc.c#L55): Unreal's allocator on a host malloc zone
 
@@ -326,18 +312,12 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 - **1.0.8 `main`** `c6901ce5…`
   - host [hle_fpslock.c:68](../../dm/host/hle_fpslock.c#L68): engine frame limit set to fps_target: NuCore video swap mode
   - host [hle_fpslock.c:69](../../dm/host/hle_fpslock.c#L69): engine frame limit set to fps_target: NuCore retrace rate
-  - host [hle_fpslock.c:68](../../dm/host/hle_fpslock.c#L68): engine frame limit set to fps_target: NuCore video swap mode
-  - host [hle_fpslock.c:69](../../dm/host/hle_fpslock.c#L69): engine frame limit set to fps_target: NuCore retrace rate
-  - host [hle_fpslock.c:68](../../dm/host/hle_fpslock.c#L68): engine frame limit set to fps_target: NuCore video swap mode
-  - host [hle_fpslock.c:69](../../dm/host/hle_fpslock.c#L69): engine frame limit set to fps_target: NuCore retrace rate
 
 ### Luigi's Mansion 3
 
 [Luigi's Mansion 3](../../dm/games/0100DCA0064A6000/README.md), `0100DCA0064A6000`.
 
 - **1.4.0 `main`** `79e5950f…`
-  - host [hle_fpslock.c:63](../../dm/host/hle_fpslock.c#L63): engine frame limit set to fps_target: NLG frame limiter target
-  - host [hle_fpslock.c:63](../../dm/host/hle_fpslock.c#L63): engine frame limit set to fps_target: NLG frame limiter target
   - host [hle_fpslock.c:63](../../dm/host/hle_fpslock.c#L63): engine frame limit set to fps_target: NLG frame limiter target
 
 ### Mario + Rabbids Kingdom Battle
@@ -375,8 +355,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 
 - **16.0.2 `main`** `c9a3dd77…`
   - host [hle_fpslock.c:26](../../dm/host/hle_fpslock.c#L26): engine frame limit set to fps_target: RE Engine frame limit
-  - host [hle_fpslock.c:26](../../dm/host/hle_fpslock.c#L26): engine frame limit set to fps_target: RE Engine frame limit
-  - host [hle_fpslock.c:26](../../dm/host/hle_fpslock.c#L26): engine frame limit set to fps_target: RE Engine frame limit
 
 ### NieR:Automata The End of YoRHa Edition (010056B015FE8000)
 
@@ -394,8 +372,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
   - cut `+0x9bf4d4`: dynamic resolution: optimal frame cost 32.01 -> 16.005 ms at 60 fps (second load)
   - cut `+0x9bf4f8`: dynamic resolution: good frame cost 30 -> 15 ms at 60 fps
   - launcher capabilities: DYNAMIC_RESOLUTION
-  - host [hle_fpslock.c:87](../../dm/host/hle_fpslock.c#L87): frame interval and dynamic-resolution floor
-  - host [hle_fpslock.c:87](../../dm/host/hle_fpslock.c#L87): frame interval and dynamic-resolution floor
   - host [hle_fpslock.c:87](../../dm/host/hle_fpslock.c#L87): frame interval and dynamic-resolution floor
 
 ### NieR:Automata The End of YoRHa Edition (0100B8E016F76000)
@@ -415,8 +391,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
   - cut `+0x9c08f4`: dynamic resolution lower bound follows the selected preset
   - launcher capabilities: DYNAMIC_RESOLUTION
   - host [hle_fpslock.c:88](../../dm/host/hle_fpslock.c#L88): frame interval and dynamic-resolution floor
-  - host [hle_fpslock.c:88](../../dm/host/hle_fpslock.c#L88): frame interval and dynamic-resolution floor
-  - host [hle_fpslock.c:88](../../dm/host/hle_fpslock.c#L88): frame interval and dynamic-resolution floor
 
 ### OCTOPATH TRAVELER 0
 
@@ -426,10 +400,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 
 - **1.0.5 `main`** `9fe60a21…` ([patches.py:9](../../dm/games/01005270232F2000/patches.py#L9))
   - cut `+0x12e40`: nninitStartup: bl 0x9f480 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)
-  - host [hle_fpslock.c:32](../../dm/host/hle_fpslock.c#L32): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:33](../../dm/host/hle_fpslock.c#L33): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:32](../../dm/host/hle_fpslock.c#L32): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:33](../../dm/host/hle_fpslock.c#L33): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_fpslock.c:32](../../dm/host/hle_fpslock.c#L32): engine frame limit set to fps_target: Unreal t.MaxFPS
   - host [hle_fpslock.c:33](../../dm/host/hle_fpslock.c#L33): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:40](../../dm/host/hle_uemalloc.c#L40): Unreal's allocator on a host malloc zone
@@ -443,10 +413,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 - **1.1.1 `main`** `0d964901…` ([patches.py:9](../../dm/games/0100A3501946E000/patches.py#L9))
   - cut `+0xbecc08`: GCreateMalloc: bl 0xc4d778 (FMallocBinned3 constructor) → nop; the host allocator's vtable is put in at the gate after it (hle_uemalloc.c)
   - gate 21 at `+0xbecc0c`: GCreateMalloc: the allocator object is in x19, before it is used: the host puts its vtable in; orig mov x0, x19
-  - host [hle_fpslock.c:53](../../dm/host/hle_fpslock.c#L53): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:54](../../dm/host/hle_fpslock.c#L54): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:53](../../dm/host/hle_fpslock.c#L53): engine frame limit set to fps_target: Unreal t.MaxFPS
-  - host [hle_fpslock.c:54](../../dm/host/hle_fpslock.c#L54): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_fpslock.c:53](../../dm/host/hle_fpslock.c#L53): engine frame limit set to fps_target: Unreal t.MaxFPS
   - host [hle_fpslock.c:54](../../dm/host/hle_fpslock.c#L54): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:48](../../dm/host/hle_uemalloc.c#L48): Unreal's allocator on a host malloc zone
@@ -480,8 +446,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 
 - **1.3.0 `main`** `94ceae32…`
   - host [hle_fpslock.c:21](../../dm/host/hle_fpslock.c#L21): engine frame limit set to fps_target: Unity targetFrameRate
-  - host [hle_fpslock.c:21](../../dm/host/hle_fpslock.c#L21): engine frame limit set to fps_target: Unity targetFrameRate
-  - host [hle_fpslock.c:21](../../dm/host/hle_fpslock.c#L21): engine frame limit set to fps_target: Unity targetFrameRate
 
 ### Pokémon Scarlet
 
@@ -501,10 +465,6 @@ Every piece of code that runs for one game and not the others: the rewriter's pa
 - **1.0.3 `main`** `0a4f14a5…` ([patches.py:9](../../dm/games/010069C01AB82000/patches.py#L9))
   - cut `+0x1f2f63c`: GCreateMalloc: bl FMallocBinned3 constructor -> nop; host malloc zone installed at OBS_UE_MALLOC
   - gate 21 at `+0x1f2f644`: GCreateMalloc: x19 is the allocator object; install the host vtable before use; orig mov x0, x19
-  - host [hle_fpslock.c:58](../../dm/host/hle_fpslock.c#L58): engine frame limit set to fps_target: Unreal Project.FrameRateLimit
-  - host [hle_fpslock.c:59](../../dm/host/hle_fpslock.c#L59): engine frame limit set to fps_target: Unreal rhi.SyncInterval
-  - host [hle_fpslock.c:58](../../dm/host/hle_fpslock.c#L58): engine frame limit set to fps_target: Unreal Project.FrameRateLimit
-  - host [hle_fpslock.c:59](../../dm/host/hle_fpslock.c#L59): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_fpslock.c:58](../../dm/host/hle_fpslock.c#L58): engine frame limit set to fps_target: Unreal Project.FrameRateLimit
   - host [hle_fpslock.c:59](../../dm/host/hle_fpslock.c#L59): engine frame limit set to fps_target: Unreal rhi.SyncInterval
   - host [hle_uemalloc.c:51](../../dm/host/hle_uemalloc.c#L51): Unreal's allocator on a host malloc zone
@@ -752,8 +712,6 @@ Applied to the `sdk` of any build without CUTS whose profile was not brought up 
 
 Dead code unless such a build is run; a candidate for removal, or for a build row in its profile.
 
-- `992787e2…`: [hle_fpslock.c:139](../../dm/host/hle_fpslock.c#L139): build check (a build no profile registers)
-- `992787e2…`: [hle_fpslock.c:139](../../dm/host/hle_fpslock.c#L139): build check (a build no profile registers)
 - `992787e2…`: [hle_fpslock.c:139](../../dm/host/hle_fpslock.c#L139): build check (a build no profile registers)
 
 ## Translator rules keyed by a shader's code

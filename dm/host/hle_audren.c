@@ -189,8 +189,10 @@ static Result ar_open(void **handle, void *ev, const uint8_t *param, void *work,
     // auto-clear event wakes only its highest-priority waiter, a kernel event wakes every waiter (each tries ResetSignal). Donkey Kong Country: Tropical Freeze waits on it from
     // two threads: its audio thread (priority 29) every frame, and the main thread while CAudioMemoryPool::Shutdown detaches a pool as a level loads (main+0x6fa8c); the audio
     // thread took every wake and the main thread waited forever. The renderer signals the event through os::SignalSystemEvent, which takes either kind
-    int local_ev = ev && (uintptr_t)ev > (uintptr_t)__builtin_frame_address(0) && (uintptr_t)ev - (uintptr_t)__builtin_frame_address(0) < 0x10000;   // see below
-    if (ev && *(int32_t *)(param + P_DEVICE) == 0 && !local_ev) {
+    // An event that is a local of the function that opens the renderer gets the host's own below instead (LEGO Star Wars: The Skywalker Saga); a host without the SDK's os (the unit tests) keeps the way above
+    int local_ev = ev && (uintptr_t)ev > (uintptr_t)__builtin_frame_address(0) && (uintptr_t)ev - (uintptr_t)__builtin_frame_address(0) < 0x10000;
+    Result (*create)(void *, int, int) = local_ev ? guest_sym("_ZN2nn2os17CreateSystemEventEPNS0_15SystemEventTypeENS0_14EventClearModeEb") : NULL;
+    if (ev && *(int32_t *)(param + P_DEVICE) == 0 && !create) {
         static void (*destroy)(void *); if (!destroy) destroy = gsym("_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE");
         destroy(ev); hle_bind_system_event(ev, 1);
     }
@@ -205,8 +207,7 @@ static Result ar_open(void **handle, void *ev, const uint8_t *param, void *work,
     // The game's SystemEvent can be a local of the function that opens the renderer, dead when the render thread signals it: LEGO Star Wars: The Skywalker Saga (nttAudioHAL::HALNX::Initialise,
     // the event at sp+0x10) aborted in SignalSystemEvent on the first render. On hardware the DSP signals a kernel handle that the event's destructor closes, so such a game never uses it
     // after the call. The render thread signals an event of its own instead.
-    if (ev && (uintptr_t)ev > (uintptr_t)__builtin_frame_address(0) && (uintptr_t)ev - (uintptr_t)__builtin_frame_address(0) < 0x10000) {
-        Result (*create)(void *, int, int) = gsym("_ZN2nn2os17CreateSystemEventEPNS0_15SystemEventTypeENS0_14EventClearModeEb");
+    if (create) {
         if (create(a->host_ev, 1, 0)) LOG("[RED] audren: cannot create the render event");
         else { a->handle[1] = a->host_ev; LOG("audren: the game's event %p is a local of its caller: the render thread signals the host's own", ev); }
     }

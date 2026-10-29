@@ -75,7 +75,7 @@ void *dm_guest_thread_spawn(void (*fn)(void *), void *arg, int prio, size_t stac
     (void)fn; (void)arg; (void)prio; (void)stack; starts++; return (void *)1;
 }
 void dm_guest_thread_join(void *tt) {
-    assert(tt == (void *)1 && !atomic_load(&g_open));
+    assert(tt == (void *)1 && !atomic_load(&g_ar[0].open));
     assert(((uint8_t *)sdk_work)[SDK_WORK - 1] == 0x5a);   // storage also survives the render thread
     joins++;
 }
