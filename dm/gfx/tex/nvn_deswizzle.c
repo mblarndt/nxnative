@@ -75,6 +75,34 @@ static int move(const nvn_texdesc *d, unsigned level, unsigned layer, uint8_t *b
     return 0;
 }
 
+// A region of one depth slice: the same segment arithmetic as move(), with the slice and row terms worked out once per row. Returns -1 (nothing written) when the region leaves the level
+int nvn_swizzle_region(const nvn_texdesc *d, unsigned level, unsigned layer, uint32_t z, uint32_t x_byte, uint32_t y_row, size_t wb, size_t hb,
+                       const void *src, size_t src_pitch, void *dst_storage) {
+    uint32_t row_bytes, rows, slices, bpb; uint64_t base; unsigned th, td;
+    if (nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb)) return -1;
+    if (z >= slices || (uint64_t)x_byte + wb > row_bytes || (uint64_t)y_row + hb > rows || src_pitch < wb) return -1;
+    uint32_t lb = nvn_tex_level_gobs(d, level) * 64;   // the row as laid out (padded in a sparse texture's tiled levels)
+    if (lb < row_bytes) lb = row_bytes;
+    static const uint16_t kox[4] = {0, 32, 256, 288}, koy[8] = {0, 16, 64, 80, 128, 144, 192, 208};   // as in move()
+    uint32_t bh = 1u << th, bd = 1u << td;
+    uint64_t block = 512ull * bh * bd, gobs_x = (uint64_t)(lb + 63) >> 6, blocks_y = ((uint64_t)rows + 8 * bh - 1) >> (3 + th);
+    uint64_t zb = (uint64_t)(z >> td) * gobs_x * blocks_y * block + (uint64_t)(z & (bd - 1)) * bh * 512;
+    uint8_t *bl = (uint8_t *)dst_storage + base;
+    for (size_t y = 0; y < hb; y++) {
+        uint32_t yy = y_row + (uint32_t)y;
+        uint64_t yb = zb + (uint64_t)(yy >> (3 + th)) * gobs_x * block + (uint64_t)((yy & (8 * bh - 1)) >> 3) * 512 + koy[yy & 7];
+        const uint8_t *s = (const uint8_t *)src + y * src_pitch;
+        uint32_t x = x_byte; size_t left = wb;
+        while (left) {   // the runs of 16 bytes are contiguous within a GOB; the first and the last may be shorter
+            uint32_t n = 16 - (x & 15); if (n > left) n = (uint32_t)left;
+            uint8_t *dst = bl + yb + (uint64_t)(x >> 6) * block + kox[(x >> 4) & 3] + (x & 15);
+            if (n == 16) memcpy(dst, s, 16); else memcpy(dst, s, n);
+            s += n; x += n; left -= n;
+        }
+    }
+    return 0;
+}
+
 int nvn_deswizzle(const nvn_texdesc *d, unsigned level, unsigned layer, const void *src, void *dst, size_t dst_pitch) {
     return move(d, level, layer, (uint8_t *)src, (uint8_t *)dst, dst_pitch, 1);
 }

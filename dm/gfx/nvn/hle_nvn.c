@@ -1407,7 +1407,8 @@ __attribute__((weak)) int dm_thermal_now(void) { return -1; }   // Default (Mac)
 __attribute__((weak)) int dm_low_power_now(void) { return 0; }   // Low Power Mode (iOS front_ios.m); off on the Mac
 // Per-frame ring for the long-frame log (GPU time only arrives 8 frames late, so store first and judge later)
 #define LFN 16
-typedef struct { uint64_t f; double fr, nv, t_s, make_ms, up_mb, up_ms; unsigned pso, lib, up, rup, hy; } lf_rec;   // hy: draws with a hybrid (pulling) pipeline
+static _Atomic uint64_t g_wt_ns, g_wt_n, g_wt_bytes, g_wm_ns, g_wp_ns, g_w2_n, g_w2_ns;   // texel writes on the calling thread (long-frame log): every one, their bytes, and the time of those that mirror a buffer copy (nvn_b2t_mirror)
+typedef struct { uint64_t f; double fr, nv, t_s, make_ms, up_mb, up_ms, wt_mb, wt_ms, wm_ms; unsigned pso, lib, up, rup, hy, wt, w2; double wp_ms, w2_ms; } lf_rec;   // hy: draws with a hybrid (pulling) pipeline
 static lf_rec g_lf[LFN];
 __attribute__((weak)) void dm_longframe_note(const char *what) { LOG("[longframe] %s", what); }   // Default (graphics unit tests); the strong definition in the host's diag.c adds scene context and writes perf.txt
 extern void mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns); extern void mtl_hybrid_stats(uint64_t *draws, uint64_t *made, uint64_t *none); extern uint64_t mtl_upload_bytes(void); extern void mtl_pkg_stats(uint64_t *uploads, uint64_t *reuploads);
@@ -1830,9 +1831,12 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
         static uint64_t plib, ppso; uint64_t lib_, pso_; mtl_create_stats(&lib_, &pso_);
         trow(f, "@lib_new", (double)(lib_ - plib)); trow(f, "@pso_new", (double)(pso_ - ppso));
         {   // long-frame log: this frame's items are first recorded into the ring; whether to print is decided 8 frames later, once the GPU time has arrived (see below)
+            static uint64_t pwtn, pwtb, pwtns, pwmns, pwpns, pw2n, pw2ns;   // texel writes since the last frame
+            uint64_t wtn_ = atomic_load(&g_wt_n), wtb_ = atomic_load(&g_wt_bytes), wtns_ = atomic_load(&g_wt_ns), wmns_ = atomic_load(&g_wm_ns), wpns_ = atomic_load(&g_wp_ns), w2n_ = atomic_load(&g_w2_n), w2ns_ = atomic_load(&g_w2_ns);
             static uint64_t plns, ppns, pup, prup, pub, phy; uint64_t lns, pns, up, rup, ub, hy, hm_, hn_; mtl_create_ns(&lns, &pns); mtl_pkg_stats(&up, &rup); ub = mtl_upload_bytes(); mtl_hybrid_stats(&hy, &hm_, &hn_);
             lf_rec *r = &g_lf[f % LFN]; r->f = f; r->fr = fr; r->nv = nv; r->t_s = (now_ns() - g_t0_ns) / 1e9; r->pso = (unsigned)(pso_ - ppso); r->lib = (unsigned)(lib_ - plib);
             r->make_ms = ((lns - plns) + (pns - ppns)) / 1e6; r->up = (unsigned)(up - pup); r->rup = (unsigned)(rup - prup); r->up_mb = (ub - pub) / 1048576.0; r->up_ms = up_ms;
+            r->wt = (unsigned)(wtn_ - pwtn); r->wt_mb = (wtb_ - pwtb) / 1048576.0; r->wt_ms = (wtns_ - pwtns) / 1e6; r->wm_ms = (wmns_ - pwmns) / 1e6; pwtn = wtn_; pwtb = wtb_; pwtns = wtns_; pwmns = wmns_; r->wp_ms = (wpns_ - pwpns) / 1e6; pwpns = wpns_; r->w2 = (unsigned)(w2n_ - pw2n); r->w2_ms = (w2ns_ - pw2ns) / 1e6; pw2n = w2n_; pw2ns = w2ns_;
             r->hy = (unsigned)(hy - phy); plns = lns; ppns = pns; pup = up; prup = rup; pub = ub; phy = hy;
         }
         plib = lib_; ppso = pso_;
@@ -1849,8 +1853,8 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
           static double ef = 16.7, eg = 8; int lf = r->fr > 20.0 && r->fr > 1.4 * ef, lg = g > 16.7 && g > 1.3 * eg;
           if (r->f == f - 8) { ef += ((r->fr < 3 * ef ? r->fr : 3 * ef) - ef) / 16; eg += ((g < 3 * eg ? g : 3 * eg) - eg) / 16; }
           if (on && r->f == f - 8 && f - 8 > 0 && (lf || lg)) { char b[512];
-              snprintf(b, sizeof b, "frame %llu (%.2f s) whole frame %.1f ms, submit+present %.1f ms, GPU %.1f ms; new pipelines %u + shader libraries %u, %.1f ms in all; texture uploads %u first + %u re-uploads, %.1f MB / %.1f ms; draws with a hybrid pipeline %u",
-                       (unsigned long long)r->f, r->t_s, r->fr, r->nv, g, r->pso, r->lib, r->make_ms, r->up, r->rup, r->up_mb, r->up_ms, r->hy);
+              snprintf(b, sizeof b, "frame %llu (%.2f s) whole frame %.1f ms, submit+present %.1f ms, GPU %.1f ms; new pipelines %u + shader libraries %u, %.1f ms in all; texture uploads %u first + %u re-uploads, %.1f MB / %.1f ms; texel writes %u, %.1f MB / %.1f ms (%.1f ms of it copies mirrored into the pool, %.1f ms unprotecting pages; %u whole-level writes %.1f ms); draws with a hybrid pipeline %u",
+                       (unsigned long long)r->f, r->t_s, r->fr, r->nv, g, r->pso, r->lib, r->make_ms, r->up, r->rup, r->up_mb, r->up_ms, r->wt, r->wt_mb, r->wt_ms, r->wm_ms, r->wp_ms, r->w2, r->w2_ms, r->hy);
               // Visibility: during the time a long frame "comes out late", what stays on screen is the previous frame; if the previous frame was a loading screen (or this frame itself is one), all the player sees is the loading screen staying a bit longer, with no motion interrupted
               dm_longframe_note(b); } }
         uint64_t g0, g1; if (frame_rec() && mtl_gpu_span(f - 8, &g0, &g1)) { trow(f - 8, "@gpu_beg_ms", (g0 - g_t0_ns) / 1e6); trow(f - 8, "@gpu_end_ms", (g1 - g_t0_ns) / 1e6); } }
@@ -2419,35 +2423,37 @@ NVN(nvnCommandBufferDownsampleTextureView, void, NVNcommandBuffer *c, const NVNt
 
 // CPU texture write (NVN WriteTexels): texture storage lives in pool memory in Tegra block-linear layout; decode the whole level → patch the region → re-encode.
 // Write protection is lifted and the range marked dirty first, so the replay layer re-uploads it the next time it is used
-// Non-3D textures: only the bytes inside the region are written, by block-linear address, without decoding the whole level. Metroid Dread's minimap (main+0x160e80) calls WriteTexels once per texel (a 1×1 region);
+// Only the bytes inside the region are written, by block-linear address (nvn_swizzle_region, slice by slice for a 3D texture), without decoding the whole level. Metroid Dread's minimap (main+0x160e80) calls WriteTexels once per texel (a 1×1 region);
 // previously every call decoded, patched and re-encoded the whole level, and after a few minutes the main thread spent whole frames there (frames stopped from 175 s). Returns −1 when the region is out of range or the format unsupported, falling back to the whole-level path
-static int write_region_bl(const tex_t *t, unsigned level, unsigned layer, const NVNcopyRegion *r, const uint8_t *src, size_t row, int bw, int bh, int bpb) {
+static int write_region_bl(const tex_t *t, unsigned level, unsigned layer, uint32_t zslice, const NVNcopyRegion *r, const uint8_t *src, size_t row, int bw, int bh, int bpb) {
     uint32_t row_bytes, rows, slices, gbpb; uint64_t base; unsigned th, td;
     if (nvn_deswizzle_geom(&t->d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &gbpb) || (int)gbpb != bpb || r->xoffset < 0 || r->yoffset < 0) return -1;
-    uint32_t x0 = (uint32_t)(r->xoffset / bw) * (uint32_t)bpb, y0 = (uint32_t)(r->yoffset / bh);
-    size_t wb = (size_t)((r->width + bw - 1) / bw) * (size_t)bpb, hb = (size_t)((r->height + bh - 1) / bh);
-    if (x0 + wb > row_bytes || y0 + hb > rows) return -1;
-    uint32_t lb = nvn_tex_level_gobs(&t->d, level) * 64; if (lb < row_bytes) lb = row_bytes;   // the row as laid out (padded in a sparse texture's tiled levels)
-    for (size_t y = 0; y < hb; y++)
-        for (size_t x = 0; x < wb;) {   // 16-byte runs are contiguous within a GOB
-            uint32_t bx = x0 + (uint32_t)x; size_t n = 16 - bx % 16; if (n > wb - x) n = wb - x;
-            memcpy(t->mem + base + nvn_bl_offset(bx, y0 + (uint32_t)y, 0, lb, rows, th, td), src + y * row + x, n); x += n;
-        }
-    return 0;
+    return nvn_swizzle_region(&t->d, level, layer, zslice, (uint32_t)(r->xoffset / bw) * (uint32_t)bpb, (uint32_t)(r->yoffset / bh),
+                              (size_t)((r->width + bw - 1) / bw) * (size_t)bpb, (size_t)((r->height + bh - 1) / bh), src, row, t->mem);
 }
+static void write_texels_(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img);
+static _Thread_local int g_wt_path;   // how the last write_texels_ went: 1 = by region (write_region_bl), 2 = the whole level decoded, patched, encoded
 static void write_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) {
+    uint64_t t0 = now_ns(); write_texels_(t, v, r, src, row, img); uint64_t d_ = now_ns() - t0; atomic_fetch_add(&g_wt_ns, d_); atomic_fetch_add(&g_wt_n, 1);
+    if (g_wt_path == 2) { atomic_fetch_add(&g_w2_n, 1); atomic_fetch_add(&g_w2_ns, d_); }
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh); if (bpb) atomic_fetch_add(&g_wt_bytes, (uint64_t)((r->width + bw - 1) / bw) * (uint64_t)bpb * (uint64_t)((r->height + bh - 1) / bh) * (uint64_t)(r->depth ? r->depth : 1));
+}
+static void write_texels_(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) {
+    g_wt_path = 0;
     if (!t->mem) { LOG("[RED] WriteTexels: texture has no storage"); return; }
     int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
     if (!bpb) { ONCE_LOG("[RED] WriteTexels: unknown format %#x", t->d.format); return; }
     unsigned level = v && v->set_levels ? (unsigned)v->base_level : 0, layer0 = v && v->set_layers ? (unsigned)v->min_layer : 0;
     int is3d = t->d.target == NVN_TEXTURE_TARGET_3D, nz = r->depth ? r->depth : 1;
-    if (!is3d) {
+    {   // by region (for a 3D texture slice by slice, nz of them): only the bytes inside the region are written, no matter how large the level is
         size_t wb0 = (size_t)((r->width + bw - 1) / bw) * bpb, row0 = row ? row : wb0, img0 = img ? img : row0 * (size_t)((r->height + bh - 1) / bh);
-        dm_guest_write_prepare(t->mem, t->L.size);
+        uint64_t tp_ = now_ns(); dm_guest_write_prepare(t->mem, t->L.size); atomic_fetch_add(&g_wp_ns, now_ns() - tp_);
         int ok = 1;
-        for (int z = 0; z < nz && ok; z++) ok = !write_region_bl(t, level, layer0 + (unsigned)(r->zoffset + z), r, src + (size_t)z * img0, row0, bw, bh, bpb);
-        if (ok) { mtl_tex_cpu_written(t); return; }
+        for (int z = 0; z < nz && ok; z++)
+            ok = !write_region_bl(t, level, is3d ? 0 : layer0 + (unsigned)(r->zoffset + z), is3d ? (uint32_t)(r->zoffset + z) : 0, r, src + (size_t)z * img0, row0, bw, bh, bpb);
+        if (ok) { g_wt_path = 1; mtl_tex_cpu_written(t); return; }
     }
+    g_wt_path = 2;
     uint32_t lw = t->d.width >> level ? t->d.width >> level : 1, lh = t->d.height >> level ? t->d.height >> level : 1, lz = is3d ? (t->d.depth >> level ? t->d.depth >> level : 1) : 1;
     size_t lp = (size_t)((lw + bw - 1) / bw) * bpb, lr = (lh + bh - 1) / bh;
     size_t wb = (size_t)((r->width + bw - 1) / bw) * bpb, hb = (size_t)(r->height + bh - 1) / bh;
@@ -2473,7 +2479,7 @@ NVN(nvnTextureWriteTexelsStrided, void, const NVNtexture *t, const NVNtextureVie
     write_texels(CTX(t), (const view_t *)v, r, src, (size_t)row, (size_t)img);
 }
 // A buffer→texture copy replayed as a WriteTexels (nvn_mtl.m copy_b2t, profile key tex_copy_mirror): the pool memory holds the texture afterwards, as it does on the Switch, where the copy writes the storage
-void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) { write_texels(t, v, r, src, row, img); }
+void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) { uint64_t t0 = now_ns(); write_texels(t, v, r, src, row, img); atomic_fetch_add(&g_wm_ns, now_ns() - t0); }
 // The movie decoder's native-texture output (DecoderMode 2, hle_movie.c): a whole frame into level 0 of the client texture, as WriteTexels does; returns the texture format, or −1 when the object is not a texture
 int nvn_host_write_texture(const void *nvntex, const void *src, int w, int h, size_t row, int *tw, int *th) {
     const tex_t *t = nvntex;

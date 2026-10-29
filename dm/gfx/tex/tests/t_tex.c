@@ -75,6 +75,57 @@ static void differential(const nvn_texdesc *d, unsigned level, unsigned layer) {
     free(storage); free(expected); free(linear); free(out);
 }
 
+// A region of one slice against the byte-address oracle: bytes outside the region stay as they were, bytes inside land where nvn_bl_offset says, rows apart by a padded pitch, odd starts and tails included
+static void region_case(const nvn_texdesc *d, unsigned level, unsigned layer) {
+    uint32_t rb, rows, slices, bpb; uint64_t base; unsigned th, td;
+    if (nvn_deswizzle_geom(d, level, layer, &rb, &rows, &slices, &base, &th, &td, &bpb)) { CHECK(0, "R geometry failed"); return; }
+    nvn_texlayout L; nvn_tex_layout(d, &L);
+    uint32_t lb = nvn_tex_level_gobs(d, level) * 64; if (lb < rb) lb = rb;
+    size_t nst = L.size + 32; uint8_t *storage = malloc(nst), *expected = malloc(nst);
+    for (size_t i = 0; i < nst; i++) storage[i] = rnd();
+    memcpy(expected, storage, nst);
+    for (int k = 0; k < 4; k++) {
+        uint32_t z = rnd() % slices, x0 = rnd() % rb, y0 = rnd() % rows;
+        size_t wb = 1 + rnd() % (rb - x0), hb = 1 + rnd() % (rows - y0);
+        if (k == 0) { x0 = 0; y0 = 0; wb = rb; hb = rows; }   // the whole slice
+        size_t pitch = wb + (rnd() & 31);
+        uint8_t *src = malloc(pitch * hb);
+        for (size_t i = 0; i < pitch * hb; i++) src[i] = rnd();
+        for (size_t y = 0; y < hb; y++) for (size_t x = 0; x < wb; x++)
+            expected[base + nvn_bl_offset(x0 + (uint32_t)x, y0 + (uint32_t)y, z, lb, rows, th, td)] = src[y * pitch + x];
+        CHECK(!nvn_swizzle_region(d, level, layer, z, x0, y0, wb, hb, src, pitch, storage) && !memcmp(storage, expected, nst),
+              "R region differs target %d format %#x mip %u layer %u slice %u at %u,%u + %zu x %zu", d->target, d->format, level, layer, z, x0, y0, wb, hb);
+        free(src);
+    }
+    uint8_t one[16] = {0};
+    CHECK(nvn_swizzle_region(d, level, layer, slices, 0, 0, 1, 1, one, 1, storage) == -1, "R a slice past the last accepted");
+    CHECK(nvn_swizzle_region(d, level, layer, 0, rb, 0, 1, 1, one, 1, storage) == -1, "R a start past the row accepted");
+    CHECK(nvn_swizzle_region(d, level, layer, 0, 0, rows - 0, 1, 1, one, 1, storage) == -1, "R a start past the last row accepted");
+    CHECK(nvn_swizzle_region(d, level, layer, 0, 0, 0, 2, 1, one, 1, storage) == -1, "R a source pitch shorter than the row accepted");
+    CHECK(!memcmp(storage, expected, nst), "R a refused region wrote");
+    free(storage); free(expected);
+}
+
+static void region_shapes(void) {
+    static const int formats[] = {0x01, 0x19, 0x1D, 0x2E, 0x42, 0x44, 0x50, 0x85};
+    static const int targets[] = {1, 2, 4, 7, 9};
+    unsigned cases = 0;
+    for (unsigned i = 0; i < 160; i++) {
+        nvn_texdesc d = {0};
+        d.target = targets[i % 5]; d.format = formats[(i / 5) % 8];
+        d.width = 1 + rnd() % 200; d.height = 1 + rnd() % 80; d.depth = 1 + rnd() % 40; d.levels = 3;
+        if (d.target == 9) d.depth = 12;
+        if ((i / 40) & 1) d.pkg_block_h = 1 + (rnd() % 4) + (d.target == 2 ? (rnd() % 3) * 16 : 0);
+        nvn_texlayout L; nvn_tex_layout(&d, &L);
+        for (unsigned l = 0; l < d.levels; l++) { region_case(&d, l, L.layers - 1); cases++; }
+    }
+    nvn_texdesc vol = {2, 0x50, 0, 0, 192, 40, 264, 1, 0, 0};   // the 192×40×264 volume LEGO writes slice by slice
+    region_case(&vol, 0, 0); cases++;
+    nvn_texdesc sparse = {1, 0x7D, 0x20, 0, 1024, 1024, 1, 5, 0, 0};
+    for (unsigned l = 0; l < sparse.levels; l++) { region_case(&sparse, l, 0); cases++; }
+    printf("  R %u layouts: regions of one slice equal the byte-address oracle, refused regions write nothing\n", cases);
+}
+
 static void differential_shapes(void) {
     static const int formats[] = {0x01, 0x0D, 0x19, 0x1D, 0x22, 0x25, 0x29, 0x2E, 0x42, 0x44, 0x82, 0x85};
     static const int targets[] = {0, 1, 2, 3, 4, 7, 8, 9};
@@ -234,6 +285,7 @@ int main(void) {
               (unsigned long long)nvn_tex_level_offset(&d, 1), (unsigned long long)L.size);
     }
 
+    region_shapes();
     printf("%s: %d/%d checks passed\n", fails ? "RED" : "all passed", checks - fails, checks);
     return fails ? 1 : 0;
 }

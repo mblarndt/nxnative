@@ -11,6 +11,10 @@
 int nvn_deswizzle(const nvn_texdesc *d, unsigned level, unsigned layer, const void *src_storage, void *dst_linear, size_t dst_pitch);
 // Reverse (for unit test round trips): linear src_linear → written into the corresponding level / layer of the whole-texture storage dst_storage
 int nvn_swizzle(const nvn_texdesc *d, unsigned level, unsigned layer, const void *src_linear, size_t src_pitch, void *dst_storage);
+// Write a region of one depth slice (z; 0 for non-3D) of one level / layer: wb bytes per row from byte x_byte, hb block rows from row y_row, rows src_pitch apart in src_linear.
+// Nothing is written and -1 is returned when the region leaves the level or src_pitch is shorter than a row of the region; 0 on success.
+int nvn_swizzle_region(const nvn_texdesc *d, unsigned level, unsigned layer, uint32_t z, uint32_t x_byte, uint32_t y_row, size_t wb, size_t hb,
+                       const void *src_linear, size_t src_pitch, void *dst_storage);
 // Single-point address: within this level and layer, linear (x byte, y block row, z slice) → block-linear byte offset relative to the start of this level and layer (unit tests verify against hand calculation).
 // row_bytes: the row as laid out, which a sparse texture's tiled levels pad to whole tiles (nvn_tex_level_gobs × 64)
 uint64_t nvn_bl_offset(uint32_t x, uint32_t y, uint32_t z, uint32_t row_bytes, uint32_t rows, unsigned tileH, unsigned tileD);
