@@ -1,5 +1,5 @@
-# kind: evidence  Super Mario Party Jamboree shaders (provisional profile) (BNSH / BAHS in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
-# column 5 records where each key first appears; this game has no PC version to pair with
+# kind: evidence  Super Mario Party Jamboree shaders (BNSH / BAHS in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
+# column 5 records where each key first appears; no PC shader pairing supplied
 package	index	stage	dm_ctl_sha16	source
 ps_archive.bin	0	pixel	6f22579c39c23e15	/Archive/_SystemBuiltinPostFx.nx.bea/_BezelSystemResources/BuiltinPostFx/autoExposure.fmdb.bnbshpk#BNSH@0x5000#var0
 vs_archive.bin	0	vertex	fce8e0e621bcc4ca	/Archive/_SystemBuiltinPostFx.nx.bea/_BezelSystemResources/BuiltinPostFx/autoExposure.fmdb.bnbshpk#BNSH@0x5000#var0

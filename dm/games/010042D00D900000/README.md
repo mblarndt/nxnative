@@ -8,7 +8,7 @@ Work in progress: the Mac host runs it from the language menu through the intro 
 
 | Setting | Where | Why |
 |---|---|---|
-| `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000`, `mem_used 0xcdbc000` | [`game.tsv`](game.tsv) | the provisional profile's values, kept: the NPDM declares no system resource, the game sets a heap with `SetMemoryHeapSize` (asks for 5.95 GB and takes 2 MB less until the pool allows it, see [`SetHeapSize` above the heap region](../../../docs/reference/memory.md#setheapsize-above-the-heap-region-is-resultlimitreached)): 2.99 GB |
+| `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000`, `mem_used 0xcdbc000` | [`game.tsv`](game.tsv) | the provisional profile's values, kept: the NPDM declares no system resource, the game sets a heap with `SetMemoryHeapSize` (asks for 5.95 GB and takes 2 MB less until the pool allows it, see [`SetHeapSize` above the heap region](../../../docs/reference/memory.md#a-heap-request-beyond-the-heap-region-returns-resultoutofmemory)): 2.99 GB |
 | `tex_flush_upload on`, `tex_dirty_upload on`, `tex_init_upload on`, `tex_copy_mirror on` | `game.tsv` | the game reads texture files into one 1.4 GB pool and makes textures over them, writes some by CPU, fills the others by `CopyBufferToTexture`, and its memory manager moves textures about in the pool with `CopyBufferToBuffer` ([NVN objects](../../../docs/reference/nvn-objects.md#a-textures-content-only-went-in-through-a-gpu-copy-and-the-game-moves-its-textures-about-in-the-pool-tex_copy_mirror)) |
 | `romfs_marker GAME0.DAT`, `zip_store .dat:.png:.metallib` | `game.tsv` | |
 
@@ -20,7 +20,7 @@ No `patches.py`, no `sdk_patches.py` cut, no `pad_layout`.
 
 ## Found on this game
 
-- **Boot:** `SetHeapSize` above the heap region ([memory](../../../docs/reference/memory.md#setheapsize-above-the-heap-region-is-resultlimitreached)); the notification pop that never gave the core back ([threads](../../../docs/reference/threads.md#blocking-host-waits-give-the-core-back-dm_thread_host_wait)); the audio renderer's event on a stack ([audio](../../../docs/reference/audio.md#the-games-renderer-event-is-a-local-of-the-function-that-opens-it)).
+- **Boot:** `SetHeapSize` above the heap region ([memory](../../../docs/reference/memory.md#a-heap-request-beyond-the-heap-region-returns-resultoutofmemory)); the notification pop that never gave the core back ([threads](../../../docs/reference/threads.md#native-hle-waits-release-the-guest-core)); the audio renderer's event on a stack ([audio](../../../docs/reference/audio.md#the-games-renderer-event-is-a-local-of-the-function-that-opens-it)).
 - **Black picture at 30 fps:** the dynamic constant buffer objects hold the game's own offset and size in the `NVNbuffer` ([NVN objects](../../../docs/reference/nvn-objects.md#a-game-writes-the-offset-and-size-into-its-nvnbuffer-buf_t)).
 - **Red lines:** `nvnCommandBufferSetStencilCullCriteria` is a hint.
 - **No text, no icons, empty or shifted textures:** a texture only the GPU copy filled came out of every move as zeros ([`tex_copy_mirror`](../../../docs/reference/nvn-objects.md#a-textures-content-only-went-in-through-a-gpu-copy-and-the-game-moves-its-textures-about-in-the-pool-tex_copy_mirror)), a texture made over data the game had read into the pool was never uploaded (`tex_init_upload`).
