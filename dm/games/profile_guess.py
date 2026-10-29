@@ -291,7 +291,7 @@ def build_sources(exefs, romfs, modules):
         for n in names:
             if n.endswith('.DAT'):
                 with open(os.path.join(d, n), 'rb') as f:
-                    size = os.path.getsize(f.name); idx = struct.unpack('<I', f.read(8)[4:8])[0] if size > 8 else 0
+                    size = os.path.getsize(os.path.join(d, n)); idx = struct.unpack('<I', f.read(8)[4:8])[0] if size > 8 else 0
                     if 0x40 < idx < size: f.seek(size - idx); tt_dats += struct.unpack('>3I', f.read(12))[1:] == (0x2e434334, 0x30544144)
     oodle_gfpak = 0   # Game Freak GFPAK archives with an Oodle Kraken entry (compression 3: Pokémon Legends: Arceus; Pokémon Sword's are LZ4): decoded with the game's own decoder
     for d, _, names in os.walk(romfs):

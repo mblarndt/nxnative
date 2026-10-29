@@ -2624,6 +2624,8 @@ static int mirror_prepare(const tex_t *t, unsigned level, unsigned layer) {   //
     return 0;
 }
 static int nvn_tex_mirror_b2t_(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img);
+// A buffer→texture copy replayed as a WriteTexels (nvn_mtl.m copy_b2t, profile key tex_copy_mirror): the pool memory holds the texture afterwards, as it does on the Switch, where the copy writes the storage
+void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) { uint64_t t0 = now_ns(); write_texels(t, v, r, src, row, img); atomic_fetch_add(&g_wm_ns, now_ns() - t0); }
 int nvn_tex_mirror_b2t(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) {
     uint64_t t0 = now_ns(); int rc = nvn_tex_mirror_b2t_(t, level, layer0, r, src, row, img); atomic_fetch_add(&g_wm_ns, now_ns() - t0); return rc;   // the long-frame log's mirrored copies
 }

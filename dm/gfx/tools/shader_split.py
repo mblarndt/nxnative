@@ -1692,7 +1692,7 @@ def tt_shaders(d, label, out):
 
 def ttdat_shaders(path, rel, ents, out):
     """A range of entries of a TT Games DAT archive (ttdat_jobs): each file decoded and read by tt_shaders"""
-    import mmap
+    from romfs import mmap
     with open(path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as d:
         for i, pos, cl, ul, mode in ents:
             data = ttdat_read(d, pos, cl, ul, mode, f'/{rel}#{i}')

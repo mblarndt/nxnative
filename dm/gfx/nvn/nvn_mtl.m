@@ -9671,8 +9671,27 @@ static void mirror_rb_land(void *p) {   // the submission's completion handler
     mrb_note(m->t.serial, -1);
     free(m);
 }
+// Profile key tex_copy_mirror: a buffer→texture copy into a plain sampled texture is carried out as a WriteTexels, so the pool memory holds the texture afterwards, as it does on the Switch.
+// LEGO Star Wars: The Skywalker Saga moves its textures about in the pool (its memory manager finalizes a texture and initializes the same object again at another offset, copying the bytes
+// of the pool): a texture whose content only ever went in through the GPU copy came out of every move as zeros (no text in the menus). The texture is uploaded from the pool when it is sampled
+void nvn_b2t_mirror(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img);   // hle_nvn.c
+static int b2t_mirror(const p_copy_b2t *c) {
+    const tex_t *t = c->tex;
+    if (!t || !t->mem || !t->pool || (t->pool->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) || t->d.samples > 1 || mtl_tex_gpu_owned(t->serial)
+        || (t->d.flags & (NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_IMAGE | NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET))) return 0;
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+    if (!bpb) return 0;
+    size_t row = S.copy_stride ? (size_t)S.copy_stride : (size_t)((c->r.width + bw - 1) / bw) * bpb;
+    size_t rows = (c->r.height + bh - 1) / bh, img = S.copy_img_stride ? (size_t)S.copy_img_stride : row * rows;
+    int nz = c->r.depth ? c->r.depth : 1;
+    void *mb; uint64_t mo;
+    if (!mtl_addr(c->src, img * nz, &mb, &mo)) return 0;
+    nvn_b2t_mirror(t, c->has_view ? &c->view : NULL, &c->r, (const uint8_t *)((__bridge id<MTLBuffer>)mb).contents + mo, (size_t)S.copy_stride, (size_t)S.copy_img_stride);
+    return 1;
+}
 static void copy_b2t(const p_copy_b2t *c) {
     if (c->tex) zskip_del(c->tex->serial);
+    if (DM_GAME_TEX_COPY_MIRROR && b2t_mirror(c)) return;   // LEGO: the copy goes into the pool as a texel write (a 3D light volume has no other mirror), before the GPU copy mirrors below
     id<MTLTexture> t = tex_mtl(c->tex);
     if (!t) { PD("C ser=%llu (no host texture)", c->tex->serial); return; }
     int bw, bh, bpb = nvn_fmt_bpb(c->tex->d.format, &bw, &bh);
